@@ -560,6 +560,41 @@ def quality_batch_detail(request, batch_id: int):
 # ========= Fin: Quality =============
 
 
+def normalize_camera_sources(raw_sources):
+    if not raw_sources:
+        return []
+
+    if isinstance(raw_sources, list):
+        return [s for s in raw_sources if isinstance(s, dict)]
+
+    if isinstance(raw_sources, tuple):
+        return [s for s in raw_sources if isinstance(s, dict)]
+
+    if isinstance(raw_sources, dict):
+        # Caso: una sola config de cámara
+        if any(k in raw_sources for k in ("type", "index", "url")):
+            return [raw_sources]
+
+        # Caso: {"primary": {...}, "fallback": {...}}
+        ordered_keys = ["primary", "main", "fallback", "backup", "secondary"]
+        ordered = []
+
+        for key in ordered_keys:
+            value = raw_sources.get(key)
+            if isinstance(value, dict):
+                ordered.append(value)
+
+        # Agrega cualquier otra config adicional no repetida
+        for key, value in raw_sources.items():
+            if key in ordered_keys:
+                continue
+            if isinstance(value, dict):
+                ordered.append(value)
+
+        return ordered
+
+    return []
+
 ## ===== Inicio: Camera streaming (MJPEG) =====
 
 def _mjpeg_generator(cam_id: str, sources: list[dict]):
@@ -584,15 +619,40 @@ def _mjpeg_generator(cam_id: str, sources: list[dict]):
 
 @login_required(login_url="login")
 def camera_stream(request, cam_id: str):
-    sources = settings.CAMERA_SOURCES.get(cam_id)
+    raw_sources = settings.CAMERA_SOURCES.get(cam_id)
+    sources = normalize_camera_sources(raw_sources)
 
     if not sources:
         return JsonResponse({"ok": False, "error": "Cámara no configurada."}, status=404)
 
-    return StreamingHttpResponse(
-        _mjpeg_generator(cam_id, sources),
-        content_type="multipart/x-mixed-replace; boundary=frame"
-    )
+    try:
+        return StreamingHttpResponse(
+            _mjpeg_generator(cam_id, sources),
+            content_type="multipart/x-mixed-replace; boundary=frame"
+        )
+    except Exception as e:
+        create_camera_error_alert(
+            message=f"No se pudo iniciar el stream de la cámara {cam_id}: {str(e)}",
+            created_by=request.user,
+            metadata={
+                "source": "camera_stream",
+                "camera_id": cam_id,
+                "error": str(e),
+            },
+        )
+
+        log_activity(
+            request=request,
+            module=ActivityLog.MODULE_QUALITY,
+            action="camera_stream_error",
+            description=f"Error al iniciar stream de la cámara {cam_id}",
+            level=ActivityLog.LEVEL_ERROR,
+            metadata={
+                "camera": cam_id,
+                "error": str(e),
+            },
+        )
+        return JsonResponse({"ok": False, "error": str(e)}, status=500)
 
 # ===== Fin: Camera streaming (MJPEG) =====
 
@@ -609,15 +669,15 @@ LIVE_SESSIONS = {}
 @login_required(login_url="login")
 def live_annotated_stream(request, cam_id: str):
     """
-    Stream MJPEG del frame anotado por la sesión (cajas+labels+ID).
-    Si aún no hay frame anotado disponible, usa temporalmente el frame normal
-    desde camera_hub para que no se vea negro.
+    Stream MJPEG del frame anotado por la sesión.
+    Si aún no hay frame anotado, usa preview normal.
     """
     sess: LiveEvalSession | None = LIVE_SESSIONS.get(cam_id)
     if not sess or sess.status()["state"] not in ("running", "finished"):
         return JsonResponse({"ok": False, "error": "No hay sesión activa."}, status=404)
 
-    sources = settings.CAMERA_SOURCES.get(cam_id)
+    raw_sources = settings.CAMERA_SOURCES.get(cam_id)
+    sources = normalize_camera_sources(raw_sources)
     worker = get_camera_worker(cam_id, sources) if sources else None
 
     def gen():
@@ -625,14 +685,12 @@ def live_annotated_stream(request, cam_id: str):
             st = sess.status()["state"]
             jpg = sess.get_latest_jpeg()
 
-            # 1) si ya existe frame anotado, úsalo
             if jpg:
                 yield (
                     b"--frame\r\n"
                     b"Content-Type: image/jpeg\r\n\r\n" + jpg + b"\r\n"
                 )
             else:
-                # 2) si aún no hay frame anotado, usa preview normal del hub
                 frame = worker.get_frame() if worker else None
                 if frame is not None:
                     ok, fallback_jpg = cv2.imencode(".jpg", frame)
@@ -683,7 +741,9 @@ def live_start(request):
             "counts": ev.counts,
         })
 
-    sources = settings.CAMERA_SOURCES.get(cam_id)
+    raw_sources = settings.CAMERA_SOURCES.get(cam_id)
+    sources = normalize_camera_sources(raw_sources)
+
     if not sources:
         create_camera_error_alert(
             message=f"La cámara {cam_id} no está configurada en el sistema.",
@@ -703,13 +763,69 @@ def live_start(request):
         except Exception:
             pass
 
+    worker = get_camera_worker(cam_id, sources)
+
+    # Espera breve para detectar qué fuente quedó realmente activa
+    active_source = None
+    for _ in range(20):  # ~2 segundos
+        active_name = worker.get_active_source_name()
+        if active_name:
+            active_source = next(
+                (src for src in sources if src.get("name") == active_name),
+                None
+            )
+            if active_source:
+                break
+        time.sleep(0.1)
+
+    if active_source is None:
+        active_source = sources[0]
+
+    # Verifica que sí exista video real antes de arrancar la evaluación
+    probe_frame = None
+    for _ in range(20):  # ~2 segundos
+        probe_frame = worker.get_frame()
+        if probe_frame is not None:
+            break
+        time.sleep(0.1)
+
+    if probe_frame is None:
+        create_camera_error_alert(
+            message=f"No se pudo obtener video desde ninguna fuente activa para la cámara {cam_id}.",
+            batch=batch,
+            created_by=request.user,
+            metadata={
+                "camera_id": cam_id,
+                "source": "live_start",
+                "sources_count": len(sources),
+            },
+        )
+
+        log_activity(
+            request=request,
+            module=ActivityLog.MODULE_QUALITY,
+            action="live_evaluation_start_error",
+            description=f"No hay video disponible para iniciar evaluación en vivo del lote {batch.code} en {cam_id}",
+            level=ActivityLog.LEVEL_ERROR,
+            obj=batch,
+            metadata={
+                "camera": cam_id,
+                "reason": "no_active_video_source",
+                "sources_count": len(sources),
+            },
+        )
+
+        return JsonResponse({
+            "ok": False,
+            "error": "No hay video disponible desde la cámara seleccionada.",
+        }, status=400)
+
     sess = LiveEvalSession(
         cam_id=cam_id,
-        source_config=sources[0],
+        source_config=active_source,
         duration_s=30,
         conf_display=0.25,
         conf_count=0.40,
-        # min_frames_confirm=6,
         tracker_cfg="bytetrack.yaml",
     )
     sess.batch_id = int(batch.id)
@@ -754,7 +870,8 @@ def live_start(request):
         metadata={
             "camera": cam_id,
             "duration_s": 30,
-            "active_source": sources[0].get("name"),
+            "active_source": active_source.get("name", "Sin nombre"),
+            "sources_count": len(sources),
         },
     )
 
@@ -796,7 +913,23 @@ def live_status(request):
     if req_batch is not None and getattr(sess, "batch_id", None) != req_batch:
         return JsonResponse({"ok": True, "state": "idle"})
 
-    return JsonResponse({"ok": True, **sess.status()})
+    status_data = sess.status()
+
+    if status_data.get("state") == "error":
+        session_batch_id = getattr(sess, "batch_id", None)
+        if session_batch_id:
+            try:
+                batch = Batch.objects.get(pk=session_batch_id)
+                persist_live_session_error(
+                    request,
+                    batch=batch,
+                    cam_id=cam_id,
+                    status_data=status_data,
+                )
+            except Batch.DoesNotExist:
+                pass
+
+    return JsonResponse({"ok": True, **status_data})
 
 
 @login_required(login_url="login")
@@ -809,6 +942,26 @@ def live_save(request):
         return JsonResponse({"ok": False, "error": "No hay sesión."}, status=404)
 
     st = sess.status()
+
+    if st.get("state") == "error":
+        batch_id = getattr(sess, "batch_id", None)
+        if batch_id:
+            try:
+                batch = Batch.objects.get(pk=batch_id)
+                persist_live_session_error(
+                    request,
+                    batch=batch,
+                    cam_id=cam_id,
+                    status_data=st,
+                )
+            except Batch.DoesNotExist:
+                pass
+
+        return JsonResponse({
+            "ok": False,
+            "error": (st.get("final") or {}).get("error") or "La sesión terminó con error.",
+        }, status=400)
+
     if st["state"] != "finished":
         return JsonResponse({"ok": False, "error": "La sesión aún no ha terminado."}, status=400)
 
@@ -825,7 +978,6 @@ def live_save(request):
         return JsonResponse({"ok": True, "already_evaluated": True})
 
     counts_raw = payload.get("counts") or {}
-    # Normaliza a tu formato primary/secondary (reusa tu helper actual)
     counts = normalize_counts_from_model({"counts": counts_raw})
 
     primary_total = int(payload.get("primary_total") or 0)
@@ -849,7 +1001,6 @@ def live_save(request):
     if ev.primary_total > 15:
         create_primary_defects_alert(ev, created_by=request.user)
 
-    # detener y limpiar sesión para que no se "pegue" a otros lotes
     try:
         sess.stop()
     except Exception:
@@ -2220,6 +2371,61 @@ def activity_logs_users_api(request):
 
 # ===== Inicio: Alerts/Registro de alerts =====
 # Helpers
+def persist_live_session_error(request, *, batch, cam_id, status_data):
+    final_data = status_data.get("final") or {}
+    error_message = (
+        final_data.get("error")
+        or status_data.get("error")
+        or "Ocurrió un error desconocido durante la evaluación en vivo."
+    )
+
+    already_logged = ActivityLog.objects.filter(
+        module=ActivityLog.MODULE_QUALITY,
+        action="live_evaluation_runtime_error",
+        object_type="batch",
+        object_id=batch.id,
+        metadata__camera=cam_id,
+        metadata__error=error_message,
+    ).exists()
+
+    already_alerted = Alert.objects.filter(
+        category=Alert.CATEGORY_CAMERA,
+        batch=batch,
+        is_active=True,
+        metadata__source="live_session_runtime",
+        metadata__camera_id=cam_id,
+        metadata__error=error_message,
+    ).exists()
+
+    if not already_alerted:
+        create_camera_error_alert(
+            message=f"Error durante la evaluación en vivo del lote {batch.code} en la cámara {cam_id}: {error_message}",
+            batch=batch,
+            created_by=request.user if hasattr(request, "user") and request.user.is_authenticated else None,
+            metadata={
+                "source": "live_session_runtime",
+                "camera_id": cam_id,
+                "batch_id": batch.id,
+                "batch_code": batch.code,
+                "error": error_message,
+            },
+        )
+
+    if not already_logged:
+        log_activity(
+            request=request,
+            module=ActivityLog.MODULE_QUALITY,
+            action="live_evaluation_runtime_error",
+            description=f"Error en evaluación en vivo del lote {batch.code} en {cam_id}",
+            level=ActivityLog.LEVEL_ERROR,
+            obj=batch,
+            metadata={
+                "camera": cam_id,
+                "error": error_message,
+            },
+        )
+
+
 def create_alert(
     *,
     title,

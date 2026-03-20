@@ -3,12 +3,55 @@ import threading
 import cv2
 
 
+def normalize_camera_sources(raw_sources):
+    """
+    Normaliza cualquier formato de configuración a lista de dicts.
+    Soporta:
+    - dict simple: {"type": "...", "index": 0}
+    - lista: [{...}, {...}]
+    - dict jerárquico: {"primary": {...}, "fallback": {...}}
+    """
+    if not raw_sources:
+        return []
+
+    if isinstance(raw_sources, list):
+        return [s for s in raw_sources if isinstance(s, dict)]
+
+    if isinstance(raw_sources, tuple):
+        return [s for s in raw_sources if isinstance(s, dict)]
+
+    if isinstance(raw_sources, dict):
+        # Caso: una sola cámara
+        if any(k in raw_sources for k in ("type", "index", "url")):
+            return [raw_sources]
+
+        # Caso: principal / fallback / backup
+        ordered_keys = ["primary", "main", "fallback", "backup", "secondary"]
+        ordered = []
+
+        for key in ordered_keys:
+            value = raw_sources.get(key)
+            if isinstance(value, dict):
+                ordered.append(value)
+
+        for key, value in raw_sources.items():
+            if key in ordered_keys:
+                continue
+            if isinstance(value, dict):
+                ordered.append(value)
+
+        return ordered
+
+    return []
+
+
 class CameraWorker:
-    def __init__(self, sources: list[dict]):
+    def __init__(self, sources):
         """
         sources: lista de fuentes en orden de prioridad.
+        También acepta dict simple o dict con primary/fallback.
         """
-        self.sources = sources
+        self.sources = normalize_camera_sources(sources)
         self.current_source_index = 0
         self.current_source = None
 
@@ -37,6 +80,12 @@ class CameraWorker:
     def _try_open_any_source(self):
         total = len(self.sources)
 
+        if total <= 0:
+            print("[WARN] No hay fuentes configuradas para esta cámara.")
+            self.current_source = None
+            self.cap = None
+            return False
+
         for i in range(total):
             idx = (self.current_source_index + i) % total
             source = self.sources[idx]
@@ -63,7 +112,7 @@ class CameraWorker:
                     cap.release()
 
             except Exception as e:
-                print(f"[WARN] No se pudo abrir fuente {source.get('name')}: {e}")
+                print(f"[WARN] No se pudo abrir fuente {source.get('name', 'unknown')}: {e}")
 
         self.current_source = None
         self.cap = None
@@ -90,6 +139,8 @@ class CameraWorker:
             try:
                 ok, frame = self.cap.read()
             except cv2.error:
+                ok, frame = False, None
+            except Exception:
                 ok, frame = False, None
 
             if not ok or frame is None:
@@ -157,22 +208,23 @@ class CameraWorker:
 CAMERA_WORKERS = {}
 
 
-def get_camera_worker(cam_id: str, sources: list[dict]) -> CameraWorker:
+def get_camera_worker(cam_id: str, sources) -> CameraWorker:
+    normalized_sources = normalize_camera_sources(sources)
     worker = CAMERA_WORKERS.get(cam_id)
 
     if worker is None:
-        worker = CameraWorker(sources=sources)
+        worker = CameraWorker(sources=normalized_sources)
         CAMERA_WORKERS[cam_id] = worker
         worker.start()
         return worker
 
-    if worker.sources != sources:
+    if worker.sources != normalized_sources:
         try:
             worker.stop()
         except Exception:
             pass
 
-        worker = CameraWorker(sources=sources)
+        worker = CameraWorker(sources=normalized_sources)
         CAMERA_WORKERS[cam_id] = worker
         worker.start()
 
