@@ -716,6 +716,60 @@ def live_annotated_stream(request, cam_id: str):
     )
 
 
+def _resolve_optional_secondary_camera(primary_cam_id: str):
+    """
+    Intenta resolver una cámara secundaria opcional.
+    Regla simple:
+    - si la principal es cam1, intenta usar cam2
+    - si la principal es cam2, intenta usar cam1
+    - si no existe config o no da video, se ignora sin romper el flujo
+    """
+    candidate_cam_id = None
+
+    if primary_cam_id == "cam1":
+        candidate_cam_id = "cam2"
+    elif primary_cam_id == "cam2":
+        candidate_cam_id = "cam1"
+    else:
+        # Si en el futuro agregas más cámaras, aquí puedes cambiar la lógica.
+        return None, None, False, "no_candidate"
+
+    raw_sources = settings.CAMERA_SOURCES.get(candidate_cam_id)
+    sources = normalize_camera_sources(raw_sources)
+
+    if not sources:
+        return candidate_cam_id, None, False, "not_configured"
+
+    worker = get_camera_worker(candidate_cam_id, sources)
+
+    active_source = None
+    for _ in range(15):  # ~1.5 s
+        active_name = worker.get_active_source_name()
+        if active_name:
+            active_source = next(
+                (src for src in sources if src.get("name") == active_name),
+                None
+            )
+            if active_source:
+                break
+        time.sleep(0.1)
+
+    if active_source is None and sources:
+        active_source = sources[0]
+
+    probe_frame = None
+    for _ in range(15):  # ~1.5 s
+        probe_frame = worker.get_frame()
+        if probe_frame is not None:
+            break
+        time.sleep(0.1)
+
+    if probe_frame is None:
+        return candidate_cam_id, None, False, "no_video"
+
+    return candidate_cam_id, active_source, True, "ok"
+
+
 @login_required(login_url="login")
 @require_POST
 @csrf_protect
@@ -765,7 +819,7 @@ def live_start(request):
 
     worker = get_camera_worker(cam_id, sources)
 
-    # Espera breve para detectar qué fuente quedó realmente activa
+    # Detectar fuente activa principal
     active_source = None
     for _ in range(20):  # ~2 segundos
         active_name = worker.get_active_source_name()
@@ -781,7 +835,7 @@ def live_start(request):
     if active_source is None:
         active_source = sources[0]
 
-    # Verifica que sí exista video real antes de arrancar la evaluación
+    # Verificar video real principal
     probe_frame = None
     for _ in range(20):  # ~2 segundos
         probe_frame = worker.get_frame()
@@ -820,6 +874,9 @@ def live_start(request):
             "error": "No hay video disponible desde la cámara seleccionada.",
         }, status=400)
 
+    # Resolver cámara secundaria opcional
+    secondary_cam_id, secondary_source_config, secondary_enabled, secondary_reason = _resolve_optional_secondary_camera(cam_id)
+
     sess = LiveEvalSession(
         cam_id=cam_id,
         source_config=active_source,
@@ -827,6 +884,20 @@ def live_start(request):
         conf_display=0.25,
         conf_count=0.40,
         tracker_cfg="bytetrack.yaml",
+        imgsz=640,
+        count_axis="y",
+        count_direction="down",
+        primary_line_ratio=0.62,
+        secondary_line_ratio=0.62,
+        max_box_area=9000,
+        secondary_cam_id=secondary_cam_id if secondary_enabled else None,
+        secondary_source_config=secondary_source_config if secondary_enabled else None,
+        sync_min_delay_s=0.05,
+        sync_max_delay_s=0.80,
+        pending_timeout_s=1.10,
+        strong_primary_conf=0.70,
+        secondary_confirm_conf=0.35,
+        fallback_primary_conf=0.55,
     )
     sess.batch_id = int(batch.id)
 
@@ -872,6 +943,9 @@ def live_start(request):
             "duration_s": 30,
             "active_source": active_source.get("name", "Sin nombre"),
             "sources_count": len(sources),
+            "secondary_enabled": secondary_enabled,
+            "secondary_camera": secondary_cam_id,
+            "secondary_reason": secondary_reason,
         },
     )
 
@@ -880,6 +954,9 @@ def live_start(request):
         "state": "running",
         "cam_id": cam_id,
         "duration_s": 30,
+        "secondary_enabled": secondary_enabled,
+        "secondary_camera": secondary_cam_id,
+        "secondary_reason": secondary_reason,
     })
 
 
@@ -929,7 +1006,10 @@ def live_status(request):
             except Batch.DoesNotExist:
                 pass
 
-    return JsonResponse({"ok": True, **status_data})
+    return JsonResponse({
+        "ok": True,
+        **status_data,
+    })
 
 
 @login_required(login_url="login")
@@ -965,7 +1045,7 @@ def live_save(request):
     if st["state"] != "finished":
         return JsonResponse({"ok": False, "error": "La sesión aún no ha terminado."}, status=400)
 
-    payload = st["final"] or {}
+    payload = st.get("final") or {}
     if not payload:
         return JsonResponse({"ok": False, "error": "No hay resultados."}, status=400)
 
@@ -1024,6 +1104,13 @@ def live_save(request):
             "primary_total": ev.primary_total,
             "secondary_total": ev.secondary_total,
             "defects_total": ev.defects_total,
+            "total_unique": int(payload.get("total_unique") or 0),
+            "used_secondary": bool(payload.get("used_secondary")),
+            "secondary_active": bool(payload.get("secondary_active")),
+            "confirmed_by_secondary": int(payload.get("confirmed_by_secondary") or 0),
+            "counted_by_primary_only": int(payload.get("counted_by_primary_only") or 0),
+            "discarded_pending": int(payload.get("discarded_pending") or 0),
+            "pending_left": int(payload.get("pending_left") or 0),
         },
     )
 
@@ -1035,6 +1122,13 @@ def live_save(request):
         "secondary_total": ev.secondary_total,
         "defects_total": ev.defects_total,
         "counts": ev.counts,
+        "total_unique": int(payload.get("total_unique") or 0),
+        "used_secondary": bool(payload.get("used_secondary")),
+        "secondary_active": bool(payload.get("secondary_active")),
+        "confirmed_by_secondary": int(payload.get("confirmed_by_secondary") or 0),
+        "counted_by_primary_only": int(payload.get("counted_by_primary_only") or 0),
+        "discarded_pending": int(payload.get("discarded_pending") or 0),
+        "pending_left": int(payload.get("pending_left") or 0),
     })
 
 # ===== Fin: Quality/Live sessions Camera =====

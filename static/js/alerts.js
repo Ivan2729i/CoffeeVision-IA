@@ -62,7 +62,7 @@
       console.error(err);
       els.tbody.innerHTML = `
         <tr>
-          <td colspan="7" class="px-6 py-10 text-center text-sm text-red-500">
+          <td colspan="7" class="px-6 py-10 text-center text-sm text-red-600">
             Ocurrió un error al cargar las alertas.
           </td>
         </tr>
@@ -73,7 +73,7 @@
   function setLoading() {
     els.tbody.innerHTML = `
       <tr>
-        <td colspan="7" class="px-6 py-10 text-center text-sm text-text-muted">
+        <td colspan="7" class="px-6 py-10 text-center text-sm text-[#8a6a58]">
           Cargando alertas...
         </td>
       </tr>
@@ -84,7 +84,7 @@
     if (!rows.length) {
       els.tbody.innerHTML = `
         <tr>
-          <td colspan="7" class="px-6 py-10 text-center text-sm text-text-muted">
+          <td colspan="7" class="px-6 py-10 text-center text-sm text-[#8a6a58]">
             No hay alertas registradas con los filtros seleccionados.
           </td>
         </tr>
@@ -100,22 +100,22 @@
       const batchCode = alert.batch_code || "—";
 
       return `
-        <tr class="border-b border-card-border/70 hover:bg-black/5 transition">
-          <td class="px-6 py-4 text-sm text-text-main whitespace-nowrap">${escapeHtml(createdAt)}</td>
+        <tr class="border-b border-[#eadfd6] hover:bg-[#fcf7f2] transition">
+          <td class="px-6 py-4 text-sm text-[#2b160b] whitespace-nowrap">${escapeHtml(createdAt)}</td>
           <td class="px-6 py-4">${severityBadge}</td>
           <td class="px-6 py-4">${categoryBadge}</td>
           <td class="px-6 py-4">
-            <div class="font-semibold text-text-main">${escapeHtml(alert.title || "—")}</div>
-            <div class="mt-1 text-sm text-text-muted">${escapeHtml(alert.message || "")}</div>
+            <div class="font-semibold text-[#2b160b]">${escapeHtml(alert.title || "—")}</div>
+            <div class="mt-1 text-sm text-[#8a6a58]">${escapeHtml(alert.message || "")}</div>
           </td>
-          <td class="px-6 py-4 text-sm text-text-main">${escapeHtml(batchCode)}</td>
+          <td class="px-6 py-4 text-sm text-[#2b160b]">${escapeHtml(batchCode)}</td>
           <td class="px-6 py-4">${stateBadge}</td>
           <td class="px-6 py-4">
             <div class="flex justify-end gap-2">
               ${
                 !alert.is_seen
                   ? `<button type="button"
-                      class="rounded-xl border border-card-border px-3 py-2 text-xs font-medium hover:bg-black/5"
+                      class="rounded-xl border border-[#ddc7b8] px-3 py-2 text-xs font-medium text-[#2b160b] hover:bg-[#f7efe8]"
                       data-alert-seen="${alert.id}">
                       Marcar vista
                     </button>`
@@ -124,7 +124,7 @@
               ${
                 alert.is_active
                   ? `<button type="button"
-                      class="rounded-xl border border-card-border px-3 py-2 text-xs font-medium hover:bg-black/5"
+                      class="rounded-xl border border-[#ddc7b8] px-3 py-2 text-xs font-medium text-[#2b160b] hover:bg-[#f7efe8]"
                       data-alert-deactivate="${alert.id}">
                       Desactivar
                     </button>`
@@ -150,7 +150,7 @@
       critical: "Critical",
     }[value] || "—";
 
-    return `<span class="inline-flex rounded-full border px-3 py-1 text-xs font-semibold ${map[value] || "border-card-border"}">${label}</span>`;
+    return `<span class="inline-flex rounded-full border px-3 py-1 text-xs font-semibold ${map[value] || "border-[#ddc7b8] text-[#2b160b]"}">${label}</span>`;
   }
 
   function renderCategory(value) {
@@ -162,12 +162,12 @@
       system: "System",
     }[value] || "—";
 
-    return `<span class="inline-flex rounded-full border border-card-border px-3 py-1 text-xs font-semibold text-text-main">${label}</span>`;
+    return `<span class="inline-flex rounded-full border border-[#ddc7b8] px-3 py-1 text-xs font-semibold text-[#2b160b] bg-white">${label}</span>`;
   }
 
   function renderState(alert) {
     if (!alert.is_active) {
-      return `<span class="inline-flex rounded-full border border-card-border px-3 py-1 text-xs font-semibold text-text-muted">Inactiva</span>`;
+      return `<span class="inline-flex rounded-full border border-[#ddc7b8] px-3 py-1 text-xs font-semibold text-[#8a6a58] bg-white">Inactiva</span>`;
     }
 
     if (!alert.is_seen) {
