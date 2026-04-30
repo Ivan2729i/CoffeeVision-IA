@@ -27,6 +27,8 @@ class LiveEvalSession:
         cam_id: str,
         source_config: dict,
         duration_s: int = 15,
+        no_grain_timeout_s: float = 6.0,
+        min_session_s: float = 3.0,
         conf_display: float = 0.22,
         conf_count: float = 0.30,
         tracker_cfg: str = "bytetrack.yaml",
@@ -53,6 +55,9 @@ class LiveEvalSession:
         self.use_secondary = bool(secondary_cam_id and secondary_source_config)
 
         self.duration_s = duration_s
+        self.no_grain_timeout_s = no_grain_timeout_s
+        self.min_session_s = min_session_s
+        self.last_grain_seen_at = None
         self.conf_display = conf_display
         self.conf_count = conf_count
         self.tracker_cfg = tracker_cfg
@@ -136,7 +141,8 @@ class LiveEvalSession:
 
             self.state = "running"
             self.started_at = time.time()
-            self.ends_at = self.started_at + self.duration_s
+            self.ends_at = None
+            self.last_grain_seen_at = self.started_at
 
         self._thread = threading.Thread(target=self._run_loop, daemon=True)
         self._thread.start()
@@ -149,12 +155,15 @@ class LiveEvalSession:
         with self._lock:
             now = time.time()
             remaining = None
-            if self.state == "running" and self.ends_at:
-                remaining = max(0, int(self.ends_at - now))
+            idle_s = None
+            if self.state == "running" and self.last_grain_seen_at:
+                idle_s = max(0, round(now - self.last_grain_seen_at, 1))
 
             return {
                 "state": self.state,
                 "remaining_s": remaining,
+                "idle_s": idle_s,
+                "no_grain_timeout_s": self.no_grain_timeout_s,
                 "error": self.error,
                 "final": self.final_payload,
                 "total_unique": self.total_unique,
@@ -254,6 +263,10 @@ class LiveEvalSession:
             return
 
         cls_name = event["final_class"]
+
+        if cls_name == "coffee_bean":
+            return
+
         self.counted_event_ids.add(event_id)
         self.confirmed_counts[cls_name] += 1
         self.total_unique += 1
@@ -332,6 +345,28 @@ class LiveEvalSession:
         self.pending_events.pop(best_event["event_id"], None)
         return True
 
+    def _is_grain_detection(self, cls_name: str) -> bool:
+        """
+        Para saber si todavía están pasando granos.
+        coffee_bean cuenta como flujo, aunque no cuente como defecto.
+        Los defectos también cuentan como flujo porque son granos defectuosos.
+        """
+        return bool(cls_name)
+
+    def _mark_grain_seen(self):
+        self.last_grain_seen_at = time.time()
+
+    def _should_finish_by_no_grain(self) -> bool:
+        if not self.started_at or not self.last_grain_seen_at:
+            return False
+
+        now = time.time()
+
+        elapsed = now - self.started_at
+        idle = now - self.last_grain_seen_at
+
+        return elapsed >= self.min_session_s and idle >= self.no_grain_timeout_s
+
     def _process_camera_tracks(
         self,
         frame,
@@ -385,6 +420,8 @@ class LiveEvalSession:
                 track_id = int(track_ids[i])
 
             cls_name = self._cls_name(names, cls_id)
+            if self._is_grain_detection(cls_name) and conf >= self.conf_count:
+                self._mark_grain_seen()
 
             x1i = max(0, min(int(x1), w - 1))
             y1i = max(0, min(int(y1), h - 1))
@@ -462,11 +499,11 @@ class LiveEvalSession:
         return self._draw_global_panel(combined)
 
     def _finalize_counts(self) -> dict:
-        counts = dict(self.confirmed_counts)
-        grading = grade_from_counts(counts)
+        raw_counts = dict(self.confirmed_counts)
+        grading = grade_from_counts(raw_counts)
 
         return {
-            "counts": counts,
+            "raw_counts": raw_counts,
             "total_unique": self.total_unique,
             "used_secondary": self.use_secondary,
             "secondary_active": self.secondary_active,
@@ -517,7 +554,7 @@ class LiveEvalSession:
                 with self._lock:
                     if self._stop_flag:
                         break
-                    if self.ends_at and time.time() >= self.ends_at:
+                    if self._should_finish_by_no_grain():
                         break
 
                 frame1 = primary_worker.get_frame()

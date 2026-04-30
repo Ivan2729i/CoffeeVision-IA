@@ -82,7 +82,7 @@
     const secondary = toNum(data.secondary_total, 0);
     const total = toNum(data.defects_total, primary + secondary);
 
-    const counts = data.counts || {};
+    const counts = data.visual_counts || data.counts || {};
     const p = counts.primary || {};
     const s = counts.secondary || {};
 

@@ -172,20 +172,35 @@
     secondaryEl.textContent = final.secondary_total ?? 0;
     gradeEl.textContent = final.grade ?? "—";
 
-    const counts = final.counts || {};
-    const entries = Object.entries(counts).sort((a, b) => (b[1] || 0) - (a[1] || 0));
+    const details = Array.isArray(final.details) ? final.details : [];
+
+    const entries = details
+      .filter((it) => Number(it.raw_count || 0) > 0)
+      .sort((a, b) => Number(b.raw_count || 0) - Number(a.raw_count || 0));
 
     if (entries.length === 0) {
       defectsEl.innerHTML = `<p class="text-sm text-gray-500">No se detectaron defectos confirmados.</p>`;
       return;
     }
 
-    defectsEl.innerHTML = entries.map(([name, qty]) => `
-      <div class="bg-white rounded-xl border border-gray-200 p-3 flex items-center justify-between">
-        <span class="text-sm text-[#2b1d16] font-semibold">${escapeHtml(name)}</span>
-        <span class="text-sm text-gray-600">${escapeHtml(qty)}</span>
-      </div>
-    `).join("");
+    defectsEl.innerHTML = entries.map((it) => {
+      const typeLabel = it.defect_type === "primary" ? "Primario" : "Secundario";
+
+      return `
+        <div class="bg-white rounded-xl border border-gray-200 p-3">
+          <div class="flex items-center justify-between gap-3">
+            <div class="min-w-0">
+              <p class="text-[11px] text-gray-500">${escapeHtml(typeLabel)}</p>
+              <p class="text-sm text-[#2b1d16] font-semibold truncate">${escapeHtml(it.code)}</p>
+            </div>
+            <div class="text-right">
+              <p class="text-[11px] text-gray-500">Visual</p>
+              <p class="text-sm font-bold text-gray-800">${escapeHtml(it.raw_count)}</p>
+            </div>
+          </div>
+        </div>
+      `;
+    }).join("");
   }
 
   async function post(url, data) {
@@ -209,13 +224,13 @@
 
     const state = j.state || "idle";
     setBadge(state);
-    remainingEl.textContent = (j.remaining_s ?? "—");
+    remainingEl.textContent = (j.idle_s ?? "—");
 
     if (!hasPolledOnce) {
       hasPolledOnce = true;
       lastState = state;
     } else if (state !== lastState) {
-      if (state === "running") notify("info", "Inició la detección en vivo (30s).");
+      if (state === "running") notify("info", "Inició la detección en vivo.");
       if (state === "finished") notify("success", "Detección finalizada. Ya puedes guardar.");
       if (state === "error") notify("error", `Error en detección: ${j.error || "desconocido"}`);
       lastState = state;
