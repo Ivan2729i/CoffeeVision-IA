@@ -9,7 +9,7 @@ import tempfile
 from django.contrib import messages
 from django.views.decorators.http import require_http_methods
 from django.db import transaction
-from .models import Batch, Provider, Evaluation, Packing, ActivityLog, Alert
+from .models import Batch, Provider, Evaluation, Packing, ActivityLog, Alert, EvaluationDefect, QualitySettings
 from .forms import ProviderForm, BatchCreateForm
 from django.http import StreamingHttpResponse, HttpResponse
 import cv2
@@ -301,44 +301,6 @@ def providers_delete(request, pk):
 
 # ========= Inicio: Quality helpers =============
 
-PRIMARY_DEFECTS = {"black", "foreign", "infested", "sour"}
-SECONDARY_DEFECTS = {"broken", "fraghusk", "husk", "immature", "green"}
-
-
-def normalize_counts_from_model(res: dict) -> dict:
-    if not isinstance(res, dict):
-        return {"primary": {}, "secondary": {}}
-
-    c = res.get("counts") or {}
-
-    if isinstance(c, dict) and ("primary" in c or "secondary" in c):
-        return {
-            "primary": dict(c.get("primary") or {}),
-            "secondary": dict(c.get("secondary") or {}),
-        }
-
-    if isinstance(c, dict):
-        out = {"primary": {}, "secondary": {}}
-        for name, val in c.items():
-            try:
-                n = int(val)
-            except:
-                n = 0
-            if n <= 0:
-                continue
-
-            if name in PRIMARY_DEFECTS:
-                out["primary"][name] = n
-            elif name in SECONDARY_DEFECTS:
-                out["secondary"][name] = n
-            else:
-                out["secondary"][name] = n
-
-        return out
-
-    return {"primary": {}, "secondary": {}}
-
-
 def totals_from_counts(counts: dict) -> tuple[int, int, int]:
     p = counts.get("primary") or {}
     s = counts.get("secondary") or {}
@@ -356,6 +318,70 @@ def totals_from_counts(counts: dict) -> tuple[int, int, int]:
     secondary_total = safe_sum(s)
     return primary_total, secondary_total, primary_total + secondary_total
 
+def save_evaluation_defects(evaluation, details):
+    details = details or []
+
+    objs = []
+
+    for item in details:
+        defect_id = item.get("defect_id")
+        if not defect_id:
+            continue
+
+        objs.append(EvaluationDefect(
+            evaluation=evaluation,
+            defect_id=defect_id,
+            raw_count=int(item.get("raw_count") or 0),
+            official_count=int(item.get("official_count") or 0),
+        ))
+
+    if objs:
+        EvaluationDefect.objects.bulk_create(objs)
+
+def get_visual_counts_from_evaluation(evaluation):
+    visual_counts = {
+        "primary": {},
+        "secondary": {},
+    }
+
+    rows = (
+        EvaluationDefect.objects
+        .select_related("defect")
+        .filter(evaluation=evaluation)
+        .order_by("defect__defect_type", "defect__code")
+    )
+
+    for row in rows:
+        if row.defect.defect_type == row.defect.TYPE_PRIMARY:
+            visual_counts["primary"][row.defect.code] = row.raw_count
+
+        elif row.defect.defect_type == row.defect.TYPE_SECONDARY:
+            visual_counts["secondary"][row.defect.code] = row.raw_count
+
+    return visual_counts
+
+
+def visual_counts_from_details(details):
+    visual_counts = {
+        "primary": {},
+        "secondary": {},
+    }
+
+    for item in details or []:
+        defect_type = item.get("defect_type")
+        code = item.get("code")
+        raw_count = int(item.get("raw_count") or 0)
+
+        if not code or raw_count <= 0:
+            continue
+
+        if defect_type == "primary":
+            visual_counts["primary"][code] = raw_count
+
+        elif defect_type == "secondary":
+            visual_counts["secondary"][code] = raw_count
+
+    return visual_counts
 
 # ========= Fin: Quality helpers =============
 
@@ -384,6 +410,7 @@ def evaluate_image(request):
             "secondary_total": ev.secondary_total,
             "defects_total": ev.defects_total,
             "counts": ev.counts,
+            "visual_counts": get_visual_counts_from_evaluation(ev),
         })
 
     f = request.FILES.get("image")
@@ -403,27 +430,14 @@ def evaluate_image(request):
         if not isinstance(res, dict):
             return JsonResponse({"ok": False, "error": "Respuesta inválida del modelo."}, status=500)
 
-        counts = normalize_counts_from_model(res)
+        counts = res.get("counts") or {"primary": {}, "secondary": {}}
+        details = res.get("details") or []
 
-        # totales: usar los del modelo si vienen, si no, calcularlos
-        primary_total = res.get("primary_total")
-        secondary_total = res.get("secondary_total")
+        primary_total = int(res.get("primary_total") or 0)
+        secondary_total = int(res.get("secondary_total") or 0)
+        defects_total = int(res.get("defects_total") or 0)
 
-        if primary_total is None or secondary_total is None:
-            p, s, t = totals_from_counts(counts)
-            primary_total, secondary_total, defects_total = p, s, t
-        else:
-            try:
-                primary_total = int(primary_total)
-            except:
-                primary_total = 0
-            try:
-                secondary_total = int(secondary_total)
-            except:
-                secondary_total = 0
-            defects_total = primary_total + secondary_total
-
-        grade = res.get("grade")
+        grade = int(res.get("grade") or 4)
         score = res.get("score")
 
         with transaction.atomic():
@@ -437,6 +451,7 @@ def evaluate_image(request):
                 secondary_total=secondary_total,
                 defects_total=defects_total,
             )
+            save_evaluation_defects(ev, details)
 
         if ev.primary_total > 15:
             create_primary_defects_alert(ev, created_by=request.user)
@@ -467,6 +482,7 @@ def evaluate_image(request):
             "secondary_total": ev.secondary_total,
             "defects_total": ev.defects_total,
             "counts": ev.counts,
+            "visual_counts": visual_counts_from_details(details),
         })
 
 
@@ -535,12 +551,15 @@ def quality_home(request):
 
     batches = Batch.objects.select_related("provider").order_by("-created_at")
 
+    quality_settings = QualitySettings.get_current()
+
     return render(request, TEMPLATE, {
         "page_title": "Quality assessment",
         "active": "quality",
         "quality_section": "home",
         "form": form,
         "batches": batches,
+        "sample_size_grams": quality_settings.sample_size_grams,
     })
 
 
@@ -549,12 +568,24 @@ def quality_batch_detail(request, batch_id: int):
     batch = get_object_or_404(Batch.objects.select_related("provider"), pk=batch_id)
     evaluation = batch.evaluation if hasattr(batch, "evaluation") else None
 
+    quality_settings = QualitySettings.get_current()
+
+    evaluation_visual_counts = {
+        "primary": {},
+        "secondary": {},
+    }
+
+    if evaluation:
+        evaluation_visual_counts = get_visual_counts_from_evaluation(evaluation)
+
     return render(request, TEMPLATE, {
         "page_title": "Quality assessment",
         "active": "quality",
         "quality_section": "detail",
         "batch": batch,
         "evaluation": evaluation,
+        "sample_size_grams": quality_settings.sample_size_grams,
+        "evaluation_visual_counts": evaluation_visual_counts,
     })
 
 # ========= Fin: Quality =============
@@ -881,6 +912,8 @@ def live_start(request):
         cam_id=cam_id,
         source_config=active_source,
         duration_s=30,
+        no_grain_timeout_s=6.0,
+        min_session_s=3.0,
         conf_display=0.25,
         conf_count=0.40,
         tracker_cfg="bytetrack.yaml",
@@ -940,7 +973,8 @@ def live_start(request):
         obj=batch,
         metadata={
             "camera": cam_id,
-            "duration_s": 30,
+            "no_grain_timeout_s": 6,
+            "mode": "detection_based",
             "active_source": active_source.get("name", "Sin nombre"),
             "sources_count": len(sources),
             "secondary_enabled": secondary_enabled,
@@ -953,7 +987,8 @@ def live_start(request):
         "ok": True,
         "state": "running",
         "cam_id": cam_id,
-        "duration_s": 30,
+        "no_grain_timeout_s": 6,
+        "mode": "detection_based",
         "secondary_enabled": secondary_enabled,
         "secondary_camera": secondary_cam_id,
         "secondary_reason": secondary_reason,
@@ -1057,12 +1092,13 @@ def live_save(request):
     if hasattr(batch, "evaluation"):
         return JsonResponse({"ok": True, "already_evaluated": True})
 
-    counts_raw = payload.get("counts") or {}
-    counts = normalize_counts_from_model({"counts": counts_raw})
+    counts = payload.get("counts") or {"primary": {}, "secondary": {}}
+    details = payload.get("details") or []
 
     primary_total = int(payload.get("primary_total") or 0)
     secondary_total = int(payload.get("secondary_total") or 0)
-    defects_total = primary_total + secondary_total
+    defects_total = int(payload.get("defects_total") or 0)
+
     grade = payload.get("grade")
     score = payload.get("score")
 
@@ -1077,6 +1113,7 @@ def live_save(request):
             secondary_total=secondary_total,
             defects_total=defects_total,
         )
+        save_evaluation_defects(ev, details)
 
     if ev.primary_total > 15:
         create_primary_defects_alert(ev, created_by=request.user)
@@ -1122,6 +1159,7 @@ def live_save(request):
         "secondary_total": ev.secondary_total,
         "defects_total": ev.defects_total,
         "counts": ev.counts,
+        "visual_counts": visual_counts_from_details(details),
         "total_unique": int(payload.get("total_unique") or 0),
         "used_secondary": bool(payload.get("used_secondary")),
         "secondary_active": bool(payload.get("secondary_active")),

@@ -7,6 +7,7 @@
       <h3 class="text-lg font-semibold text-gray-800">Lote {{ batch.code }}</h3>
       <p class="text-sm text-gray-500 mt-1">
         Proveedor: <span class="font-semibold text-gray-700">{{ batch.provider }}</span> ·
+        Muestra: <span class="font-semibold text-gray-700">{{ sample_size_grams }} g</span> ·
         Peso: <span class="font-semibold text-gray-700">{{ batch.weight_kg }} kg</span>
       </p>
     </div>
@@ -41,7 +42,7 @@
       </div>
 
       {# ===== DESGLOSE ===== #}
-      {% with p=evaluation.counts.primary s=evaluation.counts.secondary %}
+      {% with p=evaluation_visual_counts.primary s=evaluation_visual_counts.secondary %}
         <div class="mt-6">
           <p class="text-sm font-semibold text-gray-800">Conteo por defecto</p>
 

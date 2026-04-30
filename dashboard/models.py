@@ -357,3 +357,71 @@ class Alert(models.Model):
         return f"[{self.severity.upper()}] {self.title}"
 
 
+class DefectCatalog(models.Model):
+    TYPE_PRIMARY = "primary"
+    TYPE_SECONDARY = "secondary"
+
+    TYPE_CHOICES = [
+        (TYPE_PRIMARY, "Primario"),
+        (TYPE_SECONDARY, "Secundario"),
+    ]
+
+    code = models.CharField(max_length=50, unique=True, db_index=True)
+    name = models.CharField(max_length=120)
+    defect_type = models.CharField(max_length=20, choices=TYPE_CHOICES)
+    equivalence = models.PositiveSmallIntegerField(default=1)
+
+    class Meta:
+        verbose_name = "Catálogo de defecto"
+        verbose_name_plural = "Catálogo de defectos"
+        ordering = ["defect_type", "code"]
+
+    def __str__(self):
+        return f"{self.code} - {self.name}"
+
+
+class QualitySettings(models.Model):
+    sample_size_grams = models.DecimalField(
+        max_digits=6,
+        decimal_places=2,
+        default=Decimal("350.00"),
+        validators=[MinValueValidator(Decimal("100.00"))],
+    )
+
+    class Meta:
+        verbose_name = "Configuración de calidad"
+        verbose_name_plural = "Configuración de calidad"
+
+    def __str__(self):
+        return f"Muestra: {self.sample_size_grams} g"
+
+    @classmethod
+    def get_current(cls):
+        obj, _ = cls.objects.get_or_create(pk=1)
+        return obj
+
+
+class EvaluationDefect(models.Model):
+    evaluation = models.ForeignKey(
+        Evaluation,
+        on_delete=models.CASCADE,
+        related_name="defect_results",
+    )
+
+    defect = models.ForeignKey(
+        DefectCatalog,
+        on_delete=models.PROTECT,
+        related_name="evaluation_results",
+    )
+
+    raw_count = models.PositiveIntegerField(default=0)
+    official_count = models.PositiveIntegerField(default=0)
+
+    class Meta:
+        verbose_name = "Defecto detectado en evaluación"
+        verbose_name_plural = "Defectos detectados en evaluaciones"
+        unique_together = ("evaluation", "defect")
+
+    def __str__(self):
+        return f"{self.evaluation.batch.code} - {self.defect.code}"
+

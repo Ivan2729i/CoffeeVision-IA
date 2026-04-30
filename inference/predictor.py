@@ -73,11 +73,7 @@ def get_runtime_info():
 
 
 def predict(source, conf: float = 0.25, imgsz: int = 640):
-    """
-    source puede ser:
-    - ruta str
-    - numpy array (frame OpenCV)
-    """
+
     model = get_model()
     infer_kwargs = get_infer_kwargs()
 
