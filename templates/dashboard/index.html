@@ -51,6 +51,19 @@
         <span class="text-sm font-medium">Camera Monitoring</span>
       </a>
 
+      <a href="{% url 'dashboard:machine' %}"
+           class="flex items-center px-6 py-3 transition-colors
+           {% if active == 'machine' %}bg-white/10 border-l-[3px] border-[#c0895e] text-white
+           {% else %}text-[#d5c2b5] hover:text-white hover:bg-white/5{% endif %}">
+          <svg class="w-5 h-5 mr-3" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                  d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.573c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.573 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.573c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.573-1.065z"/>
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                  d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"/>
+          </svg>
+          <span class="text-sm font-medium">Machine Control</span>
+      </a>
+
       <a href="{% url 'dashboard:quality' %}"
          class="flex items-center px-6 py-3 transition-colors
          {% if active == 'quality' %}bg-white/10 border-l-[3px] border-[#c0895e] text-white
@@ -196,6 +209,10 @@
       {# CAMERA MONITORING #}
       {% elif active == "camera" %}
         {% include "dashboard/camera/home.html" %}
+
+      {# MACHINE CONTROL #}
+      {% elif active == "machine" %}
+        {% include "dashboard/machine/home.html" %}
 
       {# QUALITY ASSESSMENT #}
       {% elif active == "quality" %}

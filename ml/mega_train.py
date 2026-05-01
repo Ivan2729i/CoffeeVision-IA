@@ -5,7 +5,7 @@ BASE_DIR = Path(__file__).resolve().parent
 DATA_YAML = BASE_DIR / "datasets" / "coffee_mega_merged" / "data.yaml"
 
 def main():
-    model = YOLO("yolov8n.pt")
+    model = YOLO("weights/coffeequal_best.pt")
 
     model.train(
         data=str(DATA_YAML),
