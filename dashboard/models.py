@@ -425,3 +425,79 @@ class EvaluationDefect(models.Model):
     def __str__(self):
         return f"{self.evaluation.batch.code} - {self.defect.code}"
 
+
+
+class MoistureSettings(models.Model):
+    min_moisture = models.DecimalField(
+        max_digits=5,
+        decimal_places=2,
+        default=Decimal("10.00")
+    )
+    max_moisture = models.DecimalField(
+        max_digits=5,
+        decimal_places=2,
+        default=Decimal("12.50")
+    )
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        verbose_name = "Configuración de humedad"
+        verbose_name_plural = "Configuración de humedad"
+
+    def __str__(self):
+        return f"Humedad óptima: {self.min_moisture}% - {self.max_moisture}%"
+
+    @classmethod
+    def get_current(cls):
+        obj, _ = cls.objects.get_or_create(pk=1)
+        return obj
+
+
+class MoistureAnalysis(models.Model):
+    RESULT_LOW = "low_rejected"
+    RESULT_OPTIMAL = "optimal"
+    RESULT_HIGH = "high_rejected"
+
+    RESULT_CHOICES = [
+        (RESULT_LOW, "Rechazo por humedad baja"),
+        (RESULT_OPTIMAL, "Óptimo"),
+        (RESULT_HIGH, "Rechazo por humedad alta"),
+    ]
+
+    batch = models.OneToOneField(
+        Batch,
+        on_delete=models.CASCADE,
+        related_name="moisture_analysis"
+    )
+
+    moisture_percent = models.DecimalField(
+        max_digits=5,
+        decimal_places=2
+    )
+
+    result = models.CharField(
+        max_length=30,
+        choices=RESULT_CHOICES
+    )
+
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ["-created_at"]
+        verbose_name = "Análisis de humedad"
+        verbose_name_plural = "Análisis de humedad"
+
+    def __str__(self):
+        return f"{self.batch.code} - {self.moisture_percent}% - {self.get_result_display()}"
+
+    @classmethod
+    def classify(cls, value):
+        settings_obj = MoistureSettings.get_current()
+
+        if value < settings_obj.min_moisture:
+            return cls.RESULT_LOW
+
+        if value > settings_obj.max_moisture:
+            return cls.RESULT_HIGH
+
+        return cls.RESULT_OPTIMAL
