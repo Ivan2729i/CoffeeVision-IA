@@ -47,6 +47,14 @@ def dashboard_view(request):
 
 
 @login_required(login_url="login")
+def library_view(request):
+    return render(request, TEMPLATE, {
+        "page_title": "Defect Library",
+        "active": "library",
+    })
+
+
+@login_required(login_url="login")
 def camera_view(request):
     return render(request, TEMPLATE, {
         "page_title": "Camera Monitoring",
@@ -71,10 +79,10 @@ def quality_view(request):
 
 
 @login_required(login_url="login")
-def aroma_view(request):
+def moisture_view(request):
     return render(request, TEMPLATE, {
-        "page_title": "Aroma Analysis",
-        "active": "Aroma",
+        "page_title": "Moisture Analysis",
+        "active": "Moisture",
     })
 
 
