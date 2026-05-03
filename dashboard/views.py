@@ -2,14 +2,14 @@ from django.contrib.auth.decorators import login_required
 from django.shortcuts import render, redirect, get_object_or_404
 from django.http import JsonResponse
 from django.views.decorators.http import require_POST, require_GET
-from django.views.decorators.csrf import csrf_protect
+from django.views.decorators.csrf import csrf_protect, csrf_exempt
 from inference.analyze import analyze_image
 import os
 import tempfile
 from django.contrib import messages
 from django.views.decorators.http import require_http_methods
 from django.db import transaction
-from .models import Batch, Provider, Evaluation, Packing, ActivityLog, Alert, EvaluationDefect, QualitySettings
+from .models import Batch, Provider, Evaluation, Packing, ActivityLog, Alert, EvaluationDefect, QualitySettings, MoistureAnalysis, MoistureSettings
 from .forms import ProviderForm, BatchCreateForm
 from django.http import StreamingHttpResponse, HttpResponse
 import cv2
@@ -30,6 +30,7 @@ from decimal import Decimal
 from .camera_hub import get_camera_worker
 import json
 from django.conf import settings
+from decimal import Decimal, InvalidOperation
 
 
 
@@ -82,7 +83,7 @@ def quality_view(request):
 def moisture_view(request):
     return render(request, TEMPLATE, {
         "page_title": "Moisture Analysis",
-        "active": "Moisture",
+        "active": "moisture",
     })
 
 
@@ -2845,4 +2846,125 @@ def alert_deactivate_api(request, alert_id):
 
 
 # ===== Fin: Alerts/Registro de alerts =====
+
+
+# ===== Inicio: Moisture Analysis =====
+
+@require_GET
+def moisture_batches_api(request):
+    batches = Batch.objects.select_related("provider").order_by("-created_at")
+
+    data = []
+    for batch in batches:
+        analysis = getattr(batch, "moisture_analysis", None)
+
+        data.append({
+            "id": batch.id,
+            "code": batch.code,
+            "provider": str(batch.provider),
+            "weight_kg": str(batch.weight_kg),
+            "created_at": batch.created_at.strftime("%Y-%m-%d %H:%M"),
+            "moisture_status": "evaluated" if analysis else "draft",
+            "moisture_label": "Evaluado" if analysis else "Borrador",
+            "moisture_result": analysis.result if analysis else None,
+            "moisture_result_label": analysis.get_result_display() if analysis else None,
+        })
+
+    return JsonResponse({"ok": True, "batches": data})
+
+
+@require_GET
+def moisture_batch_detail_api(request, batch_id):
+    try:
+        batch = Batch.objects.select_related("provider").get(id=batch_id)
+    except Batch.DoesNotExist:
+        return JsonResponse({"ok": False, "error": "Lote no encontrado."}, status=404)
+
+    analysis = getattr(batch, "moisture_analysis", None)
+
+    data = {
+        "id": batch.id,
+        "code": batch.code,
+        "provider": str(batch.provider),
+        "weight_kg": str(batch.weight_kg),
+        "created_at": batch.created_at.strftime("%Y-%m-%d %H:%M"),
+        "moisture_status": "evaluated" if analysis else "draft",
+        "moisture_label": "Evaluado" if analysis else "Borrador",
+        "analysis": None,
+    }
+
+    if analysis:
+        data["analysis"] = {
+            "moisture_percent": str(analysis.moisture_percent),
+            "result": analysis.result,
+            "result_label": analysis.get_result_display(),
+            "created_at": analysis.created_at.strftime("%Y-%m-%d %H:%M"),
+        }
+
+    return JsonResponse({"ok": True, "batch": data})
+
+
+@csrf_exempt
+@require_POST
+def moisture_analyze_api(request):
+    try:
+        payload = json.loads(request.body.decode("utf-8"))
+    except json.JSONDecodeError:
+        return JsonResponse({"ok": False, "error": "JSON inválido."}, status=400)
+
+    batch_id = payload.get("batch_id")
+    moisture_percent = payload.get("moisture_percent")
+
+    if not batch_id:
+        return JsonResponse({"ok": False, "error": "Falta el lote."}, status=400)
+
+    if moisture_percent in [None, ""]:
+        return JsonResponse({"ok": False, "error": "Falta la lectura de humedad."}, status=400)
+
+    try:
+        batch = Batch.objects.get(id=batch_id)
+    except Batch.DoesNotExist:
+        return JsonResponse({"ok": False, "error": "Lote no encontrado."}, status=404)
+
+    if hasattr(batch, "moisture_analysis"):
+        return JsonResponse({
+            "ok": False,
+            "error": "Este lote ya tiene análisis de humedad."
+        }, status=400)
+
+    try:
+        moisture_value = Decimal(str(moisture_percent))
+    except (InvalidOperation, ValueError):
+        return JsonResponse({"ok": False, "error": "Lectura de humedad inválida."}, status=400)
+
+    settings_obj = MoistureSettings.get_current()
+
+    if moisture_value < settings_obj.min_moisture:
+        result = MoistureAnalysis.RESULT_LOW
+    elif moisture_value > settings_obj.max_moisture:
+        result = MoistureAnalysis.RESULT_HIGH
+    else:
+        result = MoistureAnalysis.RESULT_OPTIMAL
+
+    analysis = MoistureAnalysis.objects.create(
+        batch=batch,
+        moisture_percent=moisture_value,
+        result=result,
+    )
+
+    return JsonResponse({
+        "ok": True,
+        "message": "Análisis de humedad guardado correctamente.",
+        "analysis": {
+            "batch_id": batch.id,
+            "batch_code": batch.code,
+            "moisture_percent": str(analysis.moisture_percent),
+            "result": analysis.result,
+            "result_label": analysis.get_result_display(),
+            "created_at": analysis.created_at.strftime("%Y-%m-%d %H:%M"),
+        }
+    })
+
+# ===== Fin: Moisture Analysis =====
+
 

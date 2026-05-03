@@ -1,10 +1,185 @@
-<!DOCTYPE html>
-<html lang="en">
-<head>
-    <meta charset="UTF-8">
-    <title>Title</title>
-</head>
-<body>
+<section class="w-full">
+  <div class="bg-white rounded-2xl border border-[#eadfd7] shadow-sm overflow-hidden">
 
-</body>
-</html>
+    <!-- HEADER -->
+    <div class="px-6 py-5 border-b border-[#eadfd7] flex items-center justify-between">
+      <div>
+        <h3 class="text-xl font-bold text-[#2b1d16]">Moisture Analysis</h3>
+        <p class="text-sm text-[#7b6254] mt-1">
+          Evalúa la humedad de los lotes mediante lectura del sensor y clasifica automáticamente su estado.
+        </p>
+      </div>
+
+      <button
+        id="btn-refresh-moisture"
+        type="button"
+        class="btn-shine px-5 py-2.5 rounded-lg bg-[#2b1d16] text-white text-sm font-semibold hover:bg-[#3a281f] transition">
+        Actualizar
+      </button>
+    </div>
+
+    <!-- CONTENT -->
+    <div class="p-6 space-y-6">
+
+      <!-- KPIS -->
+      <div class="grid grid-cols-1 md:grid-cols-4 gap-4">
+        <div class="rounded-xl border border-[#eadfd7] bg-white p-4">
+          <p class="text-xs font-bold text-[#7b6254] uppercase">Lotes</p>
+          <h4 id="moisture-total-batches" class="text-2xl font-extrabold text-[#2b1d16] mt-1">0</h4>
+        </div>
+
+        <div class="rounded-xl border border-[#eadfd7] bg-white p-4">
+          <p class="text-xs font-bold text-[#7b6254] uppercase">Evaluados</p>
+          <h4 id="moisture-evaluated-batches" class="text-2xl font-extrabold text-[#2b1d16] mt-1">0</h4>
+        </div>
+
+        <div class="rounded-xl border border-[#eadfd7] bg-white p-4">
+          <p class="text-xs font-bold text-[#7b6254] uppercase">Óptimos</p>
+          <h4 id="moisture-optimal-batches" class="text-2xl font-extrabold text-[#2b1d16] mt-1">0</h4>
+        </div>
+
+        <div class="rounded-xl border border-[#eadfd7] bg-white p-4">
+          <p class="text-xs font-bold text-[#7b6254] uppercase">Rango óptimo</p>
+          <h4 class="text-2xl font-extrabold text-[#2b1d16] mt-1">10% - 12.5%</h4>
+        </div>
+      </div>
+
+      <!-- MAIN GRID -->
+      <div class="grid grid-cols-1 xl:grid-cols-3 gap-6">
+
+        <!-- LEFT: LOTES -->
+        <div class="xl:col-span-2 rounded-2xl border border-[#eadfd7] bg-white overflow-hidden">
+          <div class="px-5 py-4 border-b border-[#eadfd7] flex items-center justify-between">
+            <div>
+              <h4 class="text-lg font-bold text-[#2b1d16]">Lotes existentes</h4>
+              <p class="text-sm text-[#7b6254]">
+                Selecciona un lote para revisar o iniciar su análisis de humedad.
+              </p>
+            </div>
+
+            <span id="moisture-batch-count" class="text-sm font-semibold text-[#7b6254]">
+              0 registros
+            </span>
+          </div>
+
+          <div class="max-h-[520px] overflow-y-auto">
+            <table class="w-full text-sm">
+              <thead class="sticky top-0 bg-[#fbf7f2] text-[#5d4033] z-10">
+                <tr>
+                  <th class="text-left px-5 py-3 font-bold">Lote</th>
+                  <th class="text-left px-5 py-3 font-bold">Proveedor</th>
+                  <th class="text-left px-5 py-3 font-bold">Peso</th>
+                  <th class="text-left px-5 py-3 font-bold">Humedad</th>
+                  <th class="text-right px-5 py-3 font-bold">Acción</th>
+                </tr>
+              </thead>
+
+              <tbody id="moisture-batches-tbody" class="divide-y divide-[#f0e7e0]">
+                <tr>
+                  <td colspan="5" class="px-5 py-10 text-center text-[#8a7467]">
+                    Cargando lotes...
+                  </td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+        </div>
+
+        <!-- RIGHT: DETALLE -->
+        <div class="rounded-2xl border border-[#eadfd7] bg-white overflow-hidden flex flex-col max-h-[520px]">
+          <div class="px-5 py-4 border-b border-[#eadfd7]">
+            <h4 class="text-lg font-bold text-[#2b1d16]">Lote seleccionado</h4>
+            <p class="text-sm text-[#7b6254]">
+              Vista previa del lote y resultado del análisis.
+            </p>
+          </div>
+
+          <div id="moisture-detail-empty" class="p-5 overflow-y-auto">
+            <div class="min-h-[360px] rounded-2xl border border-dashed border-[#eadfd7] bg-[#fbf7f2] flex items-center justify-center text-center p-6">
+              <p class="text-sm font-semibold text-[#8a7467]">
+                Selecciona un lote de la lista.
+              </p>
+            </div>
+          </div>
+
+          <div id="moisture-detail-panel" class="hidden p-5 space-y-5 overflow-y-auto">
+
+            <!-- INFO LOTE -->
+            <div class="rounded-xl bg-[#fbf7f2] border border-[#eadfd7] p-4 space-y-3">
+              <div class="flex items-center justify-between">
+                <div>
+                  <p class="text-xs font-bold text-[#7b6254] uppercase">Código</p>
+                  <h5 id="moisture-detail-code" class="text-xl font-extrabold text-[#2b1d16]">L-0000</h5>
+                </div>
+
+                <span id="moisture-detail-status"
+                  class="px-3 py-1 rounded-full text-xs font-bold bg-yellow-50 text-yellow-700 border border-yellow-200">
+                  Borrador
+                </span>
+              </div>
+
+              <div>
+                <p class="text-xs font-bold text-[#7b6254] uppercase">Proveedor</p>
+                <p id="moisture-detail-provider" class="text-sm font-semibold text-[#2b1d16]">---</p>
+              </div>
+
+              <div class="grid grid-cols-2 gap-3">
+                <div class="rounded-lg bg-white border border-[#eadfd7] p-3">
+                  <p class="text-xs font-bold text-[#7b6254] uppercase">Peso</p>
+                  <p id="moisture-detail-weight" class="text-sm font-bold text-[#2b1d16]">---</p>
+                </div>
+
+                <div class="rounded-lg bg-white border border-[#eadfd7] p-3">
+                  <p class="text-xs font-bold text-[#7b6254] uppercase">Fecha</p>
+                  <p id="moisture-detail-date" class="text-sm font-bold text-[#2b1d16]">---</p>
+                </div>
+              </div>
+            </div>
+
+            <!-- SENSOR -->
+            <div class="rounded-xl border border-[#eadfd7] p-4">
+              <div class="flex items-center justify-between mb-4">
+                <div>
+                  <h5 class="text-base font-bold text-[#2b1d16]">Lectura del sensor</h5>
+                  <p class="text-sm text-[#7b6254]">La humedad será capturada desde el sensor conectado.</p>
+                </div>
+              </div>
+
+              <div class="rounded-2xl bg-[#fbf7f2] border border-[#eadfd7] p-5 text-center">
+                <p class="text-xs font-bold text-[#7b6254] uppercase">Humedad detectada</p>
+                <h3 id="moisture-reading-value" class="text-4xl font-extrabold text-[#2b1d16] mt-2">--%</h3>
+                <p id="moisture-reading-helper" class="text-xs text-[#8a7467] mt-2">
+                  Esperando lectura...
+                </p>
+              </div>
+
+              <button
+                id="btn-start-moisture-reading"
+                type="button"
+                class="btn-shine w-full mt-4 px-5 py-3 rounded-xl bg-[#2b1d16] text-white text-sm font-bold hover:bg-[#3a281f] transition">
+                Start Sensor Reading
+              </button>
+            </div>
+
+            <!-- RESULTADO -->
+            <div class="rounded-xl border border-[#eadfd7] p-4">
+              <h5 class="text-base font-bold text-[#2b1d16] mb-3">Resultado</h5>
+
+              <div id="moisture-result-box" class="rounded-xl bg-[#fbf7f2] border border-[#eadfd7] p-4">
+                <p class="text-xs font-bold text-[#7b6254] uppercase">Clasificación</p>
+                <p id="moisture-result-label" class="text-lg font-extrabold text-[#2b1d16] mt-1">
+                  Sin análisis
+                </p>
+                <p id="moisture-result-description" class="text-sm text-[#7b6254] mt-1">
+                  El resultado aparecerá después de capturar la humedad.
+                </p>
+              </div>
+            </div>
+
+          </div>
+        </div>
+
+      </div>
+    </div>
+  </div>
+</section>
