@@ -171,7 +171,7 @@
         chartGauge = new Chart(ctxGauge, {
           type: "doughnut",
           data: {
-            labels: ["Calidad", "Restante"],
+            labels: ["Aceptado", "Rechazo"],
             datasets: [{
               data: [val, 100 - val],
               cutout: "75%",

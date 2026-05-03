@@ -130,6 +130,7 @@
           <div><span class="text-[#6b4b3e]">Código:</span> <b>${esc(detail.code)}</b></div>
           <div><span class="text-[#6b4b3e]">Proveedor:</span> ${esc(detail.provider?.name ?? "—")}</div>
           <div><span class="text-[#6b4b3e]">Contacto:</span> ${esc(detail.provider?.contact ?? "—")}</div>
+          <div><span class="text-[#6b4b3e]">Muestra:</span> ${Number(detail.sample_size_g ?? 350).toFixed(0)} g</div>
           <div><span class="text-[#6b4b3e]">Peso:</span> ${Number(detail.weight_kg).toFixed(3)} kg</div>
           <div><span class="text-[#6b4b3e]">Estado:</span> ${statusLabel}</div>
           <div><span class="text-[#6b4b3e]">Creado:</span> ${fmtDate(detail.created_at)}</div>
@@ -160,6 +161,7 @@
         <div><span class="text-[#6b4b3e]">Código:</span> <b>${esc(detail.code)}</b></div>
         <div><span class="text-[#6b4b3e]">Proveedor:</span> ${esc(detail.provider?.name ?? "—")}</div>
         <div><span class="text-[#6b4b3e]">Contacto:</span> ${esc(detail.provider?.contact ?? "—")}</div>
+        <div><span class="text-[#6b4b3e]">Muestra:</span> ${Number(detail.sample_size_g ?? 350).toFixed(0)} g</div>
         <div><span class="text-[#6b4b3e]">Peso:</span> ${Number(detail.weight_kg).toFixed(3)} kg</div>
         <div><span class="text-[#6b4b3e]">Estado:</span> ${statusLabel}</div>
         <div><span class="text-[#6b4b3e]">Creado:</span> ${fmtDate(detail.created_at)}</div>
@@ -176,10 +178,22 @@
             <div class="text-xs font-semibold text-[#6b4b3e]">Grado</div>
             <div class="text-lg font-bold text-[#2b1d16]">${ev.grade ?? "—"}</div>
           </div>
-          <div class="mt-2 text-sm text-[#2b1d16]">
-            <span class="text-[#6b4b3e]">Totales de defectos:</span>
-            <b>${defectsTotal}</b>
+          <div class="mt-3 grid grid-cols-3 gap-2 text-center">
+          <div class="bg-white rounded-lg border border-[#efe6df] p-2">
+            <div class="text-[11px] text-[#6b4b3e]">Primarios</div>
+            <div class="font-bold text-[#2b1d16]">${primaryTotal}</div>
           </div>
+        
+          <div class="bg-white rounded-lg border border-[#efe6df] p-2">
+            <div class="text-[11px] text-[#6b4b3e]">Secundarios</div>
+            <div class="font-bold text-[#2b1d16]">${secondaryTotal}</div>
+          </div>
+        
+          <div class="bg-white rounded-lg border border-[#efe6df] p-2">
+            <div class="text-[11px] text-[#6b4b3e]">Total</div>
+            <div class="font-bold text-[#2b1d16]">${defectsTotal}</div>
+          </div>
+        </div>
         </div>
 
         <!-- Primarios -->

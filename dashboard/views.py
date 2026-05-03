@@ -55,6 +55,14 @@ def camera_view(request):
 
 
 @login_required(login_url="login")
+def machine_view(request):
+    return render(request, TEMPLATE, {
+        "page_title": "Machine Control",
+        "active": "machine",
+    })
+
+
+@login_required(login_url="login")
 def quality_view(request):
     return render(request, TEMPLATE, {
         "page_title": "Quality Assessment",
@@ -1208,7 +1216,7 @@ def dashboard_summary_api(request):
         .annotate(
             lots=Count("id"),
             kg=Sum("batch__weight_kg"),
-            accepted=Count(Case(When(grade__in=[1, 2], then=1), output_field=IntegerField())),
+            accepted=Count(Case(When(grade__in=[1, 2, 3], then=1), output_field=IntegerField())),
             total=Count("id"),
         )
         .order_by("month")
@@ -1235,7 +1243,7 @@ def dashboard_summary_api(request):
     global_qs = Evaluation.objects.all().aggregate(
         total_lots=Count("id"),
         total_kg=Sum("batch__weight_kg"),
-        accepted=Count(Case(When(grade__in=[1, 2], then=1), output_field=IntegerField())),
+        accepted=Count(Case(When(grade__in=[1, 2, 3], then=1), output_field=IntegerField())),
         rejected=Count(Case(When(grade=4, then=1), output_field=IntegerField())),
     )
 
@@ -1254,12 +1262,12 @@ def dashboard_summary_api(request):
     cur = Evaluation.objects.filter(created_at__date__gte=cur_start, created_at__date__lt=cur_end).aggregate(
         lots=Count("id"),
         kg=Sum("batch__weight_kg"),
-        accepted=Count(Case(When(grade__in=[1, 2], then=1), output_field=IntegerField())),
+        accepted=Count(Case(When(grade__in=[1, 2, 3], then=1), output_field=IntegerField())),
     )
     prev = Evaluation.objects.filter(created_at__date__gte=prev_start, created_at__date__lt=prev_end).aggregate(
         lots=Count("id"),
         kg=Sum("batch__weight_kg"),
-        accepted=Count(Case(When(grade__in=[1, 2], then=1), output_field=IntegerField())),
+        accepted=Count(Case(When(grade__in=[1, 2, 3], then=1), output_field=IntegerField())),
     )
 
     cur_lots = int(cur["lots"] or 0)
@@ -1365,7 +1373,7 @@ def _summary_from_evals(evals_qs):
         evals_qs.aggregate(s=Sum("batch__weight_kg"))["s"] or 0.0
     )
 
-    accepted = evals_qs.filter(grade__in=[1, 2]).count()
+    accepted = evals_qs.filter(grade__in=[1, 2, 3]).count()
     rejected = evals_qs.filter(grade=4).count()
 
     quality_pct = _safe_pct(accepted, total_lots)
@@ -1960,6 +1968,11 @@ def _safe_pct(num: int, den: int) -> float:
         return 0.0
     return round((num / den) * 100.0, 2)
 
+def _get_sample_size_g():
+    qs = QualitySettings.objects.order_by("-id").first()
+    if qs and qs.sample_size_grams:
+        return float(qs.sample_size_grams)
+    return 350.0
 
 @login_required(login_url="login")
 def batch_metrics_summary_api(request):
@@ -1973,6 +1986,7 @@ def batch_metrics_summary_api(request):
     selected_code = (request.GET.get("selected") or "").strip()
     limit = _to_int(request.GET.get("limit"), 50)
     limit = max(1, min(limit, 1500))
+    sample_size_g = _get_sample_size_g()
 
     # regla del módulo
     if year < 2024:
@@ -2015,8 +2029,8 @@ def batch_metrics_summary_api(request):
 
     total_weight_kg = evaluated_qs.aggregate(s=Sum("weight_kg"))["s"] or Decimal("0")
 
-    # calidad: grado 1-2
-    accepted = evaluated_qs.filter(evaluation__grade__in=[1, 2]).count()
+    # calidad: grado 1-3
+    accepted = evaluated_qs.filter(evaluation__grade__in=[1, 2, 3]).count()
 
     quality_pct = _safe_pct(accepted, evaluated_batches)
     rejection_pct = round(100.0 - quality_pct, 2) if evaluated_batches else 0.0
@@ -2057,7 +2071,13 @@ def batch_metrics_summary_api(request):
     # Panel detalle
     detail = None
     if selected_code:
-        b = qs.filter(code=selected_code).first()
+        b = (
+            Batch.objects
+            .select_related("provider")
+            .select_related("evaluation")
+            .filter(code=selected_code)
+            .first()
+        )
         if b:
             ev = b.evaluation if hasattr(b, "evaluation") else None
             provider_name = str(b.provider) if b.provider_id else None
@@ -2069,6 +2089,7 @@ def batch_metrics_summary_api(request):
                     "name": provider_name,
                     "contact": b.provider.contact if b.provider_id else None,
                 },
+                "sample_size_g": sample_size_g,
                 "weight_kg": float(b.weight_kg),
                 "status": b.status,
                 "created_at": b.created_at.isoformat(),
