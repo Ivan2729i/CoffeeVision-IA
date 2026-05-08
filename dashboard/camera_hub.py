@@ -67,7 +67,15 @@ class CameraWorker:
         source_type = source.get("type")
 
         if source_type == "device":
-            return cv2.VideoCapture(int(source.get("index", 0)), cv2.CAP_DSHOW)
+            index = int(source.get("index", 0))
+
+            cap = cv2.VideoCapture(index, cv2.CAP_V4L2)
+            cap.set(cv2.CAP_PROP_FOURCC, cv2.VideoWriter_fourcc(*"MJPG"))
+            cap.set(cv2.CAP_PROP_FRAME_WIDTH, 1280)
+            cap.set(cv2.CAP_PROP_FRAME_HEIGHT, 720)
+            cap.set(cv2.CAP_PROP_FPS, 30)
+
+            return cap
 
         if source_type == "rtsp":
             return cv2.VideoCapture(str(source.get("url")), cv2.CAP_FFMPEG)

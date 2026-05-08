@@ -16,6 +16,7 @@ urlpatterns = [
     path("live/save/", views.live_save, name="live_save"),
     path("live/stream/<str:cam_id>/", views.live_annotated_stream, name="live_stream"),
     path("machine/", views.machine_view, name="machine"),
+    path("api/machine/motor/", views.machine_motor_api, name="machine_motor_api"),
     path("quality/", views.quality_home, name="quality"),
     path("quality/evaluate/", views.evaluate_image, name="quality_evaluate"),
     path("quality/batch/<int:batch_id>/", views.quality_batch_detail, name="quality_batch_detail"),

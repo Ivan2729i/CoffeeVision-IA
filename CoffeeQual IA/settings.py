@@ -126,23 +126,35 @@ def _env_int(name: str, default: int) -> int:
 
 def _build_camera_sources():
     cameras = {}
+
     # =========================
     # CAM1
     # =========================
     cam1_sources = []
 
+    cam1_type = os.getenv("CAM1_TYPE", "").strip().lower()
+    cam1_index = _env_int("CAM1_INDEX", 0)
     cam1_rtsp = os.getenv("CAM1_RTSP_URL", "").strip()
+
     cam1_fallback_type = os.getenv("CAM1_FALLBACK_TYPE", "").strip().lower()
     cam1_fallback_url = os.getenv("CAM1_FALLBACK_URL", "").strip()
     cam1_fallback_index = _env_int("CAM1_FALLBACK_INDEX", 1)
 
-    if cam1_rtsp:
+    # Principal CAM1
+    if cam1_type == "rtsp" and cam1_rtsp:
         cam1_sources.append({
-            "name": "cam1_ip",
+            "name": "cam1_main",
             "type": "rtsp",
             "url": cam1_rtsp,
         })
+    elif cam1_type == "device":
+        cam1_sources.append({
+            "name": "cam1_main",
+            "type": "device",
+            "index": cam1_index,
+        })
 
+    # Fallback CAM1
     if cam1_fallback_type == "rtsp" and cam1_fallback_url:
         cam1_sources.append({
             "name": "cam1_fallback",
@@ -161,7 +173,7 @@ def _build_camera_sources():
 
     # =========================
     # CAM2
-    # =========================
+    # =========================.
     cam2_sources = []
 
     cam2_type = os.getenv("CAM2_TYPE", "").strip().lower()
@@ -170,13 +182,13 @@ def _build_camera_sources():
 
     if cam2_type == "rtsp" and cam2_rtsp:
         cam2_sources.append({
-            "name": "cam2_rtsp",
+            "name": "cam2_main",
             "type": "rtsp",
             "url": cam2_rtsp,
         })
     elif cam2_type == "device":
         cam2_sources.append({
-            "name": "cam2_device",
+            "name": "cam2_main",
             "type": "device",
             "index": cam2_index,
         })
@@ -186,9 +198,13 @@ def _build_camera_sources():
 
     return cameras
 
+
 CAMERA_SOURCES = _build_camera_sources()
 
-
-
+# Motor ESP32 / Banda transportadora
+MOTOR_SERIAL_PORT = os.getenv("MOTOR_SERIAL_PORT", "AUTO")
+MOTOR_SERIAL_BAUDRATE = int(os.getenv("MOTOR_SERIAL_BAUDRATE", "115200"))
+MOTOR_SERIAL_TIMEOUT = float(os.getenv("MOTOR_SERIAL_TIMEOUT", "1"))
+MOTOR_SERIAL_ID = os.getenv("MOTOR_SERIAL_ID", "COFFEEVISION_MOTOR_ESP32")
 
 # http://127.0.0.1:8000/
