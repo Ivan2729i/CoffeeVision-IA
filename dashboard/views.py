@@ -2,7 +2,7 @@ from django.contrib.auth.decorators import login_required
 from django.shortcuts import render, redirect, get_object_or_404
 from django.http import JsonResponse
 from django.views.decorators.http import require_POST, require_GET
-from django.views.decorators.csrf import csrf_protect, csrf_exempt
+from django.views.decorators.csrf import csrf_protect, csrf_exempt, ensure_csrf_cookie
 from inference.analyze import analyze_image
 import os
 import tempfile
@@ -30,6 +30,7 @@ from decimal import Decimal
 from .camera_hub import get_camera_worker
 import json
 from django.conf import settings
+from .motor_serial import motor_serial
 from decimal import Decimal, InvalidOperation
 
 
@@ -64,12 +65,42 @@ def camera_view(request):
 
 
 @login_required(login_url="login")
+@ensure_csrf_cookie
 def machine_view(request):
     return render(request, TEMPLATE, {
         "page_title": "Machine Control",
         "active": "machine",
     })
 
+@login_required(login_url="login")
+@require_POST
+@csrf_protect
+def machine_motor_api(request):
+    try:
+        data = json.loads(request.body or "{}")
+    except json.JSONDecodeError:
+        return JsonResponse({
+            "ok": False,
+            "error": "JSON inválido."
+        }, status=400)
+
+    command = data.get("command")
+    speed = data.get("speed")
+
+    try:
+        result = motor_serial.command(command=command, speed=speed)
+
+        return JsonResponse({
+            "ok": True,
+            "message": "Comando enviado al ESP32.",
+            **result,
+        })
+
+    except Exception as e:
+        return JsonResponse({
+            "ok": False,
+            "error": str(e),
+        }, status=500)
 
 @login_required(login_url="login")
 def quality_view(request):
@@ -2966,5 +2997,4 @@ def moisture_analyze_api(request):
     })
 
 # ===== Fin: Moisture Analysis =====
-
 

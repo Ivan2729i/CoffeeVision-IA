@@ -14,6 +14,23 @@ document.addEventListener("DOMContentLoaded", () => {
   let isRunning = false;
   let currentSpeed = Number(speedInput?.value || 50);
 
+  const MOTOR_API_URL = "/dashboard/api/machine/motor/";
+let speedTimer = null;
+
+function getCookie(name) {
+  const cookies = document.cookie ? document.cookie.split(";") : [];
+
+  for (const cookie of cookies) {
+    const trimmed = cookie.trim();
+
+    if (trimmed.startsWith(name + "=")) {
+      return decodeURIComponent(trimmed.substring(name.length + 1));
+    }
+  }
+
+  return "";
+}
+
   function injectMachineStyles() {
     if (document.getElementById("machine-control-styles")) return;
 
@@ -88,11 +105,29 @@ document.addEventListener("DOMContentLoaded", () => {
   }
 
   // Aquí el motor real
-  async function sendMotorCommand(command, speed = currentSpeed) {
-    console.log("Comando simulado:", {
-      command,
-      speed,
-    });
+async function sendMotorCommand(command, speed = currentSpeed) {
+  const response = await fetch(MOTOR_API_URL, {
+    method: "POST",
+    credentials: "same-origin",
+    headers: {
+      "Content-Type": "application/json",
+      "X-CSRFToken": getCookie("csrftoken"),
+    },
+    body: JSON.stringify({
+      command: command,
+      speed: Number(speed),
+    }),
+  });
+
+  const data = await response.json().catch(() => ({}));
+
+  if (!response.ok || !data.ok) {
+    throw new Error(data.error || "No se pudo enviar el comando al ESP32.");
+  }
+
+  console.log("Respuesta ESP32:", data);
+  return data;
+}
 
     /*
       await fetch("http://IP_DEL_ESP32/motor", {
@@ -107,35 +142,60 @@ document.addEventListener("DOMContentLoaded", () => {
       });
     */
 
-    return true;
-  }
 
-  async function startBelt() {
+async function startBelt() {
+  try {
+    btnStart.disabled = true;
+
     await sendMotorCommand("start", currentSpeed);
 
     isRunning = true;
     lastAction.textContent = "Inicio";
     updateUI();
+  } catch (error) {
+    console.error(error);
+    lastAction.textContent = `Error: ${error.message}`;
+  } finally {
+    btnStart.disabled = false;
   }
+}
 
-  async function stopBelt() {
+async function stopBelt() {
+  try {
+    btnStop.disabled = true;
+
     await sendMotorCommand("stop", 0);
 
     isRunning = false;
     lastAction.textContent = "Detención";
     updateUI();
+  } catch (error) {
+    console.error(error);
+    lastAction.textContent = `Error: ${error.message}`;
+  } finally {
+    btnStop.disabled = false;
+  }
+}
+
+async function changeSpeed(value) {
+  currentSpeed = Number(value);
+  speedValue.textContent = currentSpeed;
+
+  if (!isRunning) {
+    updateUI();
+    return;
   }
 
-  async function changeSpeed(value) {
-    currentSpeed = Number(value);
-    speedValue.textContent = currentSpeed;
+  try {
+    await sendMotorCommand("speed", currentSpeed);
 
-    if (isRunning) {
-      await sendMotorCommand("speed", currentSpeed);
-      lastAction.textContent = `Velocidad ${currentSpeed}%`;
-      updateUI();
-    }
+    lastAction.textContent = `Velocidad ${currentSpeed}%`;
+    updateUI();
+  } catch (error) {
+    console.error(error);
+    lastAction.textContent = `Error: ${error.message}`;
   }
+}
 
   injectMachineStyles();
   updateUI();
@@ -144,6 +204,16 @@ document.addEventListener("DOMContentLoaded", () => {
   btnStop?.addEventListener("click", stopBelt);
 
   speedInput?.addEventListener("input", (event) => {
-    changeSpeed(event.target.value);
-  });
+  currentSpeed = Number(event.target.value);
+
+  speedValue.textContent = currentSpeed;
+  updateUI();
+
+  clearTimeout(speedTimer);
+
+  speedTimer = setTimeout(() => {
+    changeSpeed(currentSpeed);
+  }, 180);
 });
+  });
+
