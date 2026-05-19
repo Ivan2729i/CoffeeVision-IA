@@ -4,20 +4,29 @@
     <div class="flex items-center justify-between">
       <div>
         <h3 class="text-lg font-semibold text-[#2b1d16]">Cámara 1</h3>
-        <p class="text-xs text-gray-500">Monitoreo en Vivo</p>
+        <p id="cam1-text" class="text-xs text-gray-500">Buscando cámara principal...</p>
       </div>
 
-      <span class="text-xs px-3 py-1 rounded-full bg-gray-50 text-gray-600 border border-gray-200">
-        LIVE
+      <span id="cam1-badge" class="text-xs px-3 py-1 rounded-full bg-yellow-50 text-yellow-700 border border-yellow-200">
+        BUSCANDO
       </span>
     </div>
 
     <div class="mt-4 rounded-2xl overflow-hidden border border-[#eadfd3] bg-black">
-      <div class="w-full h-[320px] lg:h-[360px] flex items-center justify-center">
+      <div class="relative w-full h-[320px] lg:h-[360px] flex items-center justify-center">
         <img
+          id="cam1-img"
           src="{% url 'dashboard:camera_stream' 'cam1' %}"
+          data-stream-url="{% url 'dashboard:camera_stream' 'cam1' %}"
           class="max-w-full max-h-full object-contain"
-          alt="Cam 1 stream"/>
+          alt="Cam 1 stream"
+        />
+
+        <div id="cam1-placeholder" class="hidden absolute inset-0 bg-[#fbf7f2] flex items-center justify-center text-center px-6">
+          <p class="text-sm text-gray-500">
+            Conecta la cámara principal para mostrarla aquí.
+          </p>
+        </div>
       </div>
     </div>
   </div>
@@ -27,17 +36,29 @@
     <div class="flex items-center justify-between">
       <div>
         <h3 class="text-lg font-semibold text-[#2b1d16]">Cámara 2</h3>
-        <p class="text-xs text-gray-500">Reservada para segunda cámara</p>
+        <p id="cam2-text" class="text-xs text-gray-500">Buscando segunda cámara...</p>
       </div>
 
-      <span class="text-xs px-3 py-1 rounded-full bg-gray-50 text-gray-600 border border-gray-200">
-        OFFLINE
+      <span id="cam2-badge" class="text-xs px-3 py-1 rounded-full bg-yellow-50 text-yellow-700 border border-yellow-200">
+        BUSCANDO
       </span>
     </div>
 
-    <div class="mt-4 rounded-2xl overflow-hidden border border-[#eadfd3] bg-[#fbf7f2]">
-      <div class="w-full h-[320px] lg:h-[360px] flex items-center justify-center">
-        <p class="text-sm text-gray-500">Conecta una segunda cámara para mostrarla aquí.</p>
+    <div class="mt-4 rounded-2xl overflow-hidden border border-[#eadfd3] bg-black">
+      <div class="relative w-full h-[320px] lg:h-[360px] flex items-center justify-center">
+        <img
+          id="cam2-img"
+          src="{% url 'dashboard:camera_stream' 'cam2' %}"
+          data-stream-url="{% url 'dashboard:camera_stream' 'cam2' %}"
+          class="max-w-full max-h-full object-contain"
+          alt="Cam 2 stream"
+        />
+
+        <div id="cam2-placeholder" class="hidden absolute inset-0 bg-[#fbf7f2] flex items-center justify-center text-center px-6">
+          <p class="text-sm text-gray-500">
+            Conecta una segunda cámara para mostrarla aquí.
+          </p>
+        </div>
       </div>
     </div>
   </div>

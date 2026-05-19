@@ -177,7 +177,7 @@ def _build_camera_sources():
     cam2_sources = []
 
     cam2_type = os.getenv("CAM2_TYPE", "").strip().lower()
-    cam2_index = _env_int("CAM2_INDEX", 0)
+    cam2_index = _env_int("CAM2_INDEX", 2)
     cam2_rtsp = os.getenv("CAM2_RTSP_URL", "").strip()
 
     if cam2_type == "rtsp" and cam2_rtsp:

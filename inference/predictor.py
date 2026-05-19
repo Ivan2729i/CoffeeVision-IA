@@ -1,9 +1,11 @@
 from pathlib import Path
 import torch
 from ultralytics import YOLO
+torch.backends.cudnn.benchmark = True
 
 BASE_DIR = Path(__file__).resolve().parent.parent
 MODEL_PATH = BASE_DIR / "ml" / "weights" / "coffeequal_best.pt"
+
 
 _model = None
 _device = None
@@ -51,14 +53,19 @@ def build_model():
 
 
 def get_infer_kwargs():
-    # Devuelve kwargs comunes de inferencia para no repetirlos.
-
-    device = get_device()
-    half = device.startswith("cuda")
+    """
+    Kwargs comunes de inferencia para Ultralytics.
+    En CUDA es más estable pasar device=0.
+    """
+    if torch.cuda.is_available():
+        return {
+            "device": 0,
+            "half": True,
+        }
 
     return {
-        "device": device,
-        "half": half,
+        "device": "cpu",
+        "half": False,
     }
 
 

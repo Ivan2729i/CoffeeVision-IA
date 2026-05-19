@@ -43,7 +43,7 @@ document.addEventListener("DOMContentLoaded", () => {
   }
 
   function updateZoomLabel() {
-    zoomLabel.textContent = `${Math.round(scale * 80)}%`;
+    zoomLabel.textContent = `${Math.round(scale * 100)}%`;
   }
 
   function waitFrame() {
@@ -166,7 +166,7 @@ document.addEventListener("DOMContentLoaded", () => {
           return;
         }
 
-        const viewport = page.getViewport({ scale: 1.15 });
+        const viewport = page.getViewport({ scale });
 
         const tempCanvas = document.createElement("canvas");
         const tempCtx = tempCanvas.getContext("2d");
@@ -232,6 +232,10 @@ document.addEventListener("DOMContentLoaded", () => {
       });
 
       pageFlip.loadFromHTML(pages);
+
+      const targetPage = Math.max(0, Math.min(pageNum - 1, pages.length - 1));
+      pageFlip.flip(targetPage, "instant");
+      pageNumEl.textContent = pageNum;
 
       pageFlip.on("flip", (e) => {
         pageNum = e.data + 1;
