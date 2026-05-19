@@ -26,13 +26,13 @@ from collections import Counter
 from reportlab.lib.pagesizes import letter
 from reportlab.pdfgen import canvas
 from reportlab.lib.units import inch
-from decimal import Decimal
 from .camera_hub import get_camera_worker
 import json
 from django.conf import settings
 from .motor_serial import motor_serial
 from decimal import Decimal, InvalidOperation
-
+from reportlab.lib import colors
+from reportlab.lib.utils import ImageReader
 
 
 # ========= Inicio: Vistas SideBar =============
@@ -1559,6 +1559,186 @@ def reports_lote_api(request, batch_id: int):
         }
     })
 
+def _pdf_lote_response(batch, ev, provider_name, filename):
+    buf = io.BytesIO()
+    c = canvas.Canvas(buf, pagesize=letter)
+    width, height = letter
+
+    brown = colors.HexColor("#3b2416")
+    green = colors.HexColor("#7da145")
+    dark = colors.HexColor("#1f2933")
+    soft = colors.HexColor("#f7f3ed")
+    line = colors.HexColor("#ded6cc")
+
+    logo_path = os.path.join(settings.BASE_DIR, "static", "img", "logo2.png")
+
+    # Fondo
+    c.setFillColor(colors.white)
+    c.rect(0, 0, width, height, fill=1, stroke=0)
+
+    # Header
+    c.setFillColor(soft)
+    c.roundRect(0.45 * inch, height - 1.55 * inch, width - 0.9 * inch, 1.05 * inch, 18, fill=1, stroke=0)
+
+    if os.path.exists(logo_path):
+        logo = ImageReader(logo_path)
+        c.drawImage(logo, 0.75 * inch, height - 1.32 * inch, width=0.75 * inch, height=0.75 * inch, preserveAspectRatio=True, mask="auto")
+
+    c.setFillColor(brown)
+    c.setFont("Helvetica-Bold", 20)
+    c.drawString(1.65 * inch, height - 0.9 * inch, "CoffeeVision AI")
+
+    c.setFillColor(green)
+    c.setFont("Helvetica-Bold", 13)
+    c.drawString(1.65 * inch, height - 1.18 * inch, "Reporte individual por lote")
+
+    c.setFillColor(dark)
+    c.setFont("Helvetica", 8)
+    c.drawRightString(width - 0.75 * inch, height - 0.78 * inch, f"Generado: {timezone.now().strftime('%Y-%m-%d %H:%M')}")
+
+    # Datos principales
+    y = height - 2.05 * inch
+
+    c.setFillColor(brown)
+    c.setFont("Helvetica-Bold", 14)
+    c.drawString(0.7 * inch, y, "Información del lote")
+
+    y -= 0.18 * inch
+    c.setStrokeColor(line)
+    c.line(0.7 * inch, y, width - 0.7 * inch, y)
+
+    y -= 0.38 * inch
+
+    def label_value(x, y, label, value):
+        c.setFillColor(colors.HexColor("#6b5b4f"))
+        c.setFont("Helvetica-Bold", 8)
+        c.drawString(x, y, label.upper())
+        c.setFillColor(dark)
+        c.setFont("Helvetica-Bold", 10)
+        c.drawString(x, y - 0.18 * inch, str(value))
+
+    label_value(0.8 * inch, y, "Lote", f"{batch.code} (ID {batch.id})")
+    label_value(3.1 * inch, y, "Proveedor", provider_name or "—")
+    label_value(5.4 * inch, y, "Peso", f"{float(batch.weight_kg):.3f} kg")
+
+    y -= 0.72 * inch
+
+    label_value(0.8 * inch, y, "Fecha evaluación", ev.created_at.strftime("%Y-%m-%d %H:%M"))
+    label_value(3.1 * inch, y, "Método", ev.method or "—")
+    label_value(5.4 * inch, y, "Estado", getattr(batch, "status", "—"))
+
+    # Tarjetas de métricas
+    y -= 0.95 * inch
+
+    cards = [
+        ("Grado", ev.grade if ev.grade is not None else "—"),
+        ("Score", f"{float(ev.score):.2f}" if ev.score is not None else "—"),
+        ("Primarios", ev.primary_total),
+        ("Secundarios", ev.secondary_total),
+        ("Total defectos", ev.defects_total),
+    ]
+
+    card_w = (width - 1.4 * inch - 0.32 * inch) / 5
+    x = 0.7 * inch
+
+    for title, value in cards:
+        c.setFillColor(colors.white)
+        c.setStrokeColor(line)
+        c.roundRect(x, y - 0.75 * inch, card_w, 0.68 * inch, 10, fill=1, stroke=1)
+
+        c.setFillColor(colors.HexColor("#6b5b4f"))
+        c.setFont("Helvetica-Bold", 7.5)
+        c.drawCentredString(x + card_w / 2, y - 0.28 * inch, title.upper())
+
+        c.setFillColor(brown)
+        c.setFont("Helvetica-Bold", 16)
+        c.drawCentredString(x + card_w / 2, y - 0.56 * inch, str(value))
+
+        x += card_w + 0.08 * inch
+
+    # Resumen
+    y -= 1.18 * inch
+
+    c.setFillColor(brown)
+    c.setFont("Helvetica-Bold", 14)
+    c.drawString(0.7 * inch, y, "Resumen de calidad")
+
+    y -= 0.18 * inch
+    c.setStrokeColor(line)
+    c.line(0.7 * inch, y, width - 0.7 * inch, y)
+
+    y -= 0.35 * inch
+    c.setFillColor(dark)
+    c.setFont("Helvetica", 10)
+
+    accepted = "Aceptado" if ev.grade in [1, 2, 3] else "Rechazado"
+    quality_label = {
+        1: "Especialidad",
+        2: "Premium",
+        3: "Comercial",
+        4: "Industrial / Rechazo",
+    }.get(ev.grade, "Sin clasificar")
+
+    c.drawString(0.8 * inch, y, f"Clasificación: {quality_label}")
+    c.drawString(3.6 * inch, y, f"Resultado operativo: {accepted}")
+
+    y -= 0.28 * inch
+    c.drawString(0.8 * inch, y, f"Totales oficiales: P {ev.primary_total} | S {ev.secondary_total} | Total {ev.defects_total}")
+
+    # Defectos
+    y -= 0.65 * inch
+
+    primary, secondary = _normalize_counts(ev.counts)
+
+    def draw_defect_box(title, data, x, y):
+        box_w = 2.95 * inch
+        box_h = 2.1 * inch
+
+        c.setFillColor(colors.white)
+        c.setStrokeColor(line)
+        c.roundRect(x, y - box_h, box_w, box_h, 12, fill=1, stroke=1)
+
+        c.setFillColor(brown)
+        c.setFont("Helvetica-Bold", 11)
+        c.drawString(x + 0.18 * inch, y - 0.3 * inch, title)
+
+        c.setStrokeColor(line)
+        c.line(x + 0.18 * inch, y - 0.45 * inch, x + box_w - 0.18 * inch, y - 0.45 * inch)
+
+        c.setFillColor(dark)
+        c.setFont("Helvetica", 9)
+
+        yy = y - 0.72 * inch
+        if not data:
+            c.drawString(x + 0.22 * inch, yy, "Sin datos.")
+            return
+
+        for k, v in data.items():
+            if yy < y - box_h + 0.25 * inch:
+                break
+            c.drawString(x + 0.22 * inch, yy, str(k).replace("_", " ").title())
+            c.drawRightString(x + box_w - 0.25 * inch, yy, str(v))
+            yy -= 0.22 * inch
+
+    draw_defect_box("Defectos primarios", primary, 0.7 * inch, y)
+    draw_defect_box("Defectos secundarios", secondary, 3.85 * inch, y)
+
+    # Footer
+    c.setFillColor(colors.HexColor("#8a7a6b"))
+    c.setFont("Helvetica-Oblique", 8)
+    c.drawCentredString(width / 2, 0.55 * inch, "Generado automáticamente por CoffeeVision AI - Sistema de clasificación de café verde")
+
+    c.showPage()
+    c.save()
+
+    pdf = buf.getvalue()
+    buf.close()
+
+    resp = HttpResponse(pdf, content_type="application/pdf")
+    resp["Content-Disposition"] = f'attachment; filename="{filename}"'
+    return resp
+
+
 
 @login_required(login_url="login")
 def reports_lote_pdf(request, batch_id: int):
@@ -1607,7 +1787,7 @@ def reports_lote_pdf(request, batch_id: int):
         },
     )
 
-    return _pdf_response("CoffeeVision AI - Reporte por Lote", filename, meta, summary)
+    return _pdf_lote_response(batch, ev, provider_name, filename)
 
 
 @login_required(login_url="login")
@@ -1697,6 +1877,241 @@ def reports_month_api(request):
     })
 
 
+def _pdf_month_response(year, month, summary, filename):
+    buf = io.BytesIO()
+    c = canvas.Canvas(buf, pagesize=letter)
+    width, height = letter
+
+    brown = colors.HexColor("#3b2416")
+    green = colors.HexColor("#7da145")
+    dark = colors.HexColor("#1f2933")
+    soft = colors.HexColor("#f7f3ed")
+    line = colors.HexColor("#ded6cc")
+
+    logo_path = os.path.join(settings.BASE_DIR, "static", "img", "logo2.png")
+
+    # Fondo
+    c.setFillColor(colors.white)
+    c.rect(0, 0, width, height, fill=1, stroke=0)
+
+    # HEADER
+    c.setFillColor(soft)
+    c.roundRect(0.45 * inch, height - 1.55 * inch, width - 0.9 * inch, 1.05 * inch, 18, fill=1, stroke=0)
+
+    if os.path.exists(logo_path):
+        logo = ImageReader(logo_path)
+        c.drawImage(
+            logo,
+            0.75 * inch,
+            height - 1.32 * inch,
+            width=0.75 * inch,
+            height=0.75 * inch,
+            preserveAspectRatio=True,
+            mask="auto"
+        )
+
+    c.setFillColor(brown)
+    c.setFont("Helvetica-Bold", 20)
+    c.drawString(1.65 * inch, height - 0.9 * inch, "CoffeeVision AI")
+
+    c.setFillColor(green)
+    c.setFont("Helvetica-Bold", 13)
+    c.drawString(
+        1.65 * inch,
+        height - 1.18 * inch,
+        f"Reporte mensual · {MONTH_NAMES_ES[month-1]} {year}"
+    )
+
+    c.setFillColor(dark)
+    c.setFont("Helvetica", 8)
+    c.drawRightString(
+        width - 0.75 * inch,
+        height - 0.78 * inch,
+        f"Generado: {timezone.now().strftime('%Y-%m-%d %H:%M')}"
+    )
+
+    # KPIs
+    y = height - 2.35 * inch
+
+    cards = [
+        ("Lotes", summary["total_lots"]),
+        ("KG Procesados", f"{summary['total_kg']:.3f}"),
+        ("Calidad", f"{summary['quality_pct']:.2f}%"),
+        ("Rechazo", f"{summary['reject_pct']:.2f}%"),
+    ]
+
+    card_w = (width - 1.4 * inch - 0.24 * inch) / 4
+    x = 0.7 * inch
+
+    for title, value in cards:
+        c.setFillColor(colors.white)
+        c.setStrokeColor(line)
+
+        c.roundRect(
+            x,
+            y - 0.85 * inch,
+            card_w,
+            0.75 * inch,
+            12,
+            fill=1,
+            stroke=1
+        )
+
+        c.setFillColor(colors.HexColor("#6b5b4f"))
+        c.setFont("Helvetica-Bold", 8)
+        c.drawCentredString(
+            x + card_w / 2,
+            y - 0.28 * inch,
+            title.upper()
+        )
+
+        c.setFillColor(brown)
+        c.setFont("Helvetica-Bold", 18)
+        c.drawCentredString(
+            x + card_w / 2,
+            y - 0.58 * inch,
+            str(value)
+        )
+
+        x += card_w + 0.08 * inch
+
+    # RESUMEN
+    y -= 1.25 * inch
+
+    c.setFillColor(brown)
+    c.setFont("Helvetica-Bold", 14)
+    c.drawString(0.7 * inch, y, "Resumen operativo")
+
+    y -= 0.18 * inch
+    c.setStrokeColor(line)
+    c.line(0.7 * inch, y, width - 0.7 * inch, y)
+
+    y -= 0.35 * inch
+
+    accepted = summary["total_lots"] - summary["rejected"]
+
+    c.setFillColor(dark)
+    c.setFont("Helvetica", 10)
+
+    c.drawString(
+        0.8 * inch,
+        y,
+        f"Lotes aceptados: {accepted}"
+    )
+
+    c.drawString(
+        3.4 * inch,
+        y,
+        f"Lotes rechazados: {summary['rejected']}"
+    )
+
+    y -= 0.28 * inch
+
+    c.drawString(
+        0.8 * inch,
+        y,
+        f"Porcentaje de calidad operacional: {summary['quality_pct']:.2f}%"
+    )
+
+    # DEFECTOS
+    y -= 0.75 * inch
+
+    primary = summary["top_defects"]["primary"]
+    secondary = summary["top_defects"]["secondary"]
+
+    def draw_defect_box(title, data, x, y):
+        box_w = 2.95 * inch
+        box_h = 3.0 * inch
+
+        c.setFillColor(colors.white)
+        c.setStrokeColor(line)
+
+        c.roundRect(
+            x,
+            y - box_h,
+            box_w,
+            box_h,
+            12,
+            fill=1,
+            stroke=1
+        )
+
+        c.setFillColor(brown)
+        c.setFont("Helvetica-Bold", 11)
+        c.drawString(x + 0.18 * inch, y - 0.3 * inch, title)
+
+        c.setStrokeColor(line)
+        c.line(
+            x + 0.18 * inch,
+            y - 0.45 * inch,
+            x + box_w - 0.18 * inch,
+            y - 0.45 * inch
+        )
+
+        c.setFillColor(dark)
+        c.setFont("Helvetica", 9)
+
+        yy = y - 0.72 * inch
+
+        if not data:
+            c.drawString(x + 0.22 * inch, yy, "Sin datos.")
+            return
+
+        for k, v in data.items():
+            if yy < y - box_h + 0.25 * inch:
+                break
+
+            c.drawString(
+                x + 0.22 * inch,
+                yy,
+                str(k).replace("_", " ").title()
+            )
+
+            c.drawRightString(
+                x + box_w - 0.25 * inch,
+                yy,
+                str(v)
+            )
+
+            yy -= 0.22 * inch
+
+    draw_defect_box(
+        "Top defectos primarios",
+        primary,
+        0.7 * inch,
+        y
+    )
+
+    draw_defect_box(
+        "Top defectos secundarios",
+        secondary,
+        3.85 * inch,
+        y
+    )
+
+    # FOOTER
+    c.setFillColor(colors.HexColor("#8a7a6b"))
+    c.setFont("Helvetica-Oblique", 8)
+
+    c.drawCentredString(
+        width / 2,
+        0.55 * inch,
+        "Generado automáticamente por CoffeeVision AI"
+    )
+
+    c.showPage()
+    c.save()
+
+    pdf = buf.getvalue()
+    buf.close()
+
+    resp = HttpResponse(pdf, content_type="application/pdf")
+    resp["Content-Disposition"] = f'attachment; filename="{filename}"'
+
+    return resp
+
+
+
 @login_required(login_url="login")
 def reports_month_pdf(request):
     try:
@@ -1744,7 +2159,7 @@ def reports_month_pdf(request):
         },
     )
 
-    return _pdf_response("CoffeeVision AI - Reporte Mensual", filename, meta, summary)
+    return _pdf_month_response(year, month, summary, filename)
 
 
 @login_required(login_url="login")
@@ -1815,6 +2230,145 @@ def reports_global_api(request):
     return JsonResponse({"ok": True, "mode": "global", "has_data": summary["total_lots"] > 0, "summary": summary})
 
 
+def _pdf_global_response(summary, filename="reporte_global.pdf"):
+    buf = io.BytesIO()
+    c = canvas.Canvas(buf, pagesize=letter)
+    width, height = letter
+
+    brown = colors.HexColor("#3b2416")
+    green = colors.HexColor("#7da145")
+    dark = colors.HexColor("#1f2933")
+    soft = colors.HexColor("#f7f3ed")
+    line = colors.HexColor("#ded6cc")
+
+    logo_path = os.path.join(settings.BASE_DIR, "static", "img", "logo2.png")
+
+    c.setFillColor(colors.white)
+    c.rect(0, 0, width, height, fill=1, stroke=0)
+
+    c.setFillColor(soft)
+    c.roundRect(0.45 * inch, height - 1.55 * inch, width - 0.9 * inch, 1.05 * inch, 18, fill=1, stroke=0)
+
+    if os.path.exists(logo_path):
+        logo = ImageReader(logo_path)
+        c.drawImage(logo, 0.75 * inch, height - 1.32 * inch, width=0.75 * inch, height=0.75 * inch, preserveAspectRatio=True, mask="auto")
+
+    c.setFillColor(brown)
+    c.setFont("Helvetica-Bold", 20)
+    c.drawString(1.65 * inch, height - 0.9 * inch, "CoffeeVision AI")
+
+    c.setFillColor(green)
+    c.setFont("Helvetica-Bold", 13)
+    c.drawString(1.65 * inch, height - 1.18 * inch, "Reporte global · Todos los lotes evaluados")
+
+    c.setFillColor(dark)
+    c.setFont("Helvetica", 8)
+    c.drawRightString(width - 0.75 * inch, height - 0.78 * inch, f"Generado: {timezone.now().strftime('%Y-%m-%d %H:%M')}")
+
+    y = height - 2.35 * inch
+
+    cards = [
+        ("Lotes", summary["total_lots"]),
+        ("KG Procesados", f"{summary['total_kg']:.3f}"),
+        ("Calidad", f"{summary['quality_pct']:.2f}%"),
+        ("Rechazo", f"{summary['reject_pct']:.2f}%"),
+    ]
+
+    card_w = (width - 1.4 * inch - 0.24 * inch) / 4
+    x = 0.7 * inch
+
+    for title, value in cards:
+        c.setFillColor(colors.white)
+        c.setStrokeColor(line)
+        c.roundRect(x, y - 0.85 * inch, card_w, 0.75 * inch, 12, fill=1, stroke=1)
+
+        c.setFillColor(colors.HexColor("#6b5b4f"))
+        c.setFont("Helvetica-Bold", 8)
+        c.drawCentredString(x + card_w / 2, y - 0.28 * inch, title.upper())
+
+        c.setFillColor(brown)
+        c.setFont("Helvetica-Bold", 18)
+        c.drawCentredString(x + card_w / 2, y - 0.58 * inch, str(value))
+
+        x += card_w + 0.08 * inch
+
+    y -= 1.25 * inch
+
+    c.setFillColor(brown)
+    c.setFont("Helvetica-Bold", 14)
+    c.drawString(0.7 * inch, y, "Resumen general")
+
+    y -= 0.18 * inch
+    c.setStrokeColor(line)
+    c.line(0.7 * inch, y, width - 0.7 * inch, y)
+
+    y -= 0.35 * inch
+
+    accepted = summary["total_lots"] - summary["rejected"]
+
+    c.setFillColor(dark)
+    c.setFont("Helvetica", 10)
+    c.drawString(0.8 * inch, y, f"Lotes aceptados: {accepted}")
+    c.drawString(3.4 * inch, y, f"Lotes rechazados: {summary['rejected']}")
+
+    y -= 0.28 * inch
+    c.drawString(0.8 * inch, y, f"Porcentaje global de calidad operacional: {summary['quality_pct']:.2f}%")
+
+    y -= 0.75 * inch
+
+    primary = summary["top_defects"]["primary"]
+    secondary = summary["top_defects"]["secondary"]
+
+    def draw_defect_box(title, data, x, y):
+        box_w = 2.95 * inch
+        box_h = 3.0 * inch
+
+        c.setFillColor(colors.white)
+        c.setStrokeColor(line)
+        c.roundRect(x, y - box_h, box_w, box_h, 12, fill=1, stroke=1)
+
+        c.setFillColor(brown)
+        c.setFont("Helvetica-Bold", 11)
+        c.drawString(x + 0.18 * inch, y - 0.3 * inch, title)
+
+        c.setStrokeColor(line)
+        c.line(x + 0.18 * inch, y - 0.45 * inch, x + box_w - 0.18 * inch, y - 0.45 * inch)
+
+        c.setFillColor(dark)
+        c.setFont("Helvetica", 9)
+
+        yy = y - 0.72 * inch
+
+        if not data:
+            c.drawString(x + 0.22 * inch, yy, "Sin datos.")
+            return
+
+        for k, v in data.items():
+            if yy < y - box_h + 0.25 * inch:
+                break
+
+            c.drawString(x + 0.22 * inch, yy, str(k).replace("_", " ").title())
+            c.drawRightString(x + box_w - 0.25 * inch, yy, str(v))
+            yy -= 0.22 * inch
+
+    draw_defect_box("Top defectos primarios", primary, 0.7 * inch, y)
+    draw_defect_box("Top defectos secundarios", secondary, 3.85 * inch, y)
+
+    c.setFillColor(colors.HexColor("#8a7a6b"))
+    c.setFont("Helvetica-Oblique", 8)
+    c.drawCentredString(width / 2, 0.55 * inch, "Generado automáticamente por CoffeeVision AI")
+
+    c.showPage()
+    c.save()
+
+    pdf = buf.getvalue()
+    buf.close()
+
+    resp = HttpResponse(pdf, content_type="application/pdf")
+    resp["Content-Disposition"] = f'attachment; filename="{filename}"'
+    return resp
+
+
 @login_required(login_url="login")
 def reports_global_pdf(request):
     qs = Evaluation.objects.all()
@@ -1845,7 +2399,7 @@ def reports_global_pdf(request):
         },
     )
 
-    return _pdf_response("CoffeeVision AI - Reporte Global", "reporte_global.pdf", meta, summary)
+    return _pdf_global_response(summary, "reporte_global.pdf")
 
 
 @login_required(login_url="login")
@@ -1905,6 +2459,182 @@ def reports_provider_api(request, provider_id: int):
     })
 
 
+def _pdf_provider_response(provider, provider_name, summary, filename):
+    buf = io.BytesIO()
+    c = canvas.Canvas(buf, pagesize=letter)
+    width, height = letter
+
+    brown = colors.HexColor("#3b2416")
+    green = colors.HexColor("#7da145")
+    dark = colors.HexColor("#1f2933")
+    soft = colors.HexColor("#f7f3ed")
+    line = colors.HexColor("#ded6cc")
+
+    logo_path = os.path.join(settings.BASE_DIR, "static", "img", "logo2.png")
+
+    c.setFillColor(colors.white)
+    c.rect(0, 0, width, height, fill=1, stroke=0)
+
+    c.setFillColor(soft)
+    c.roundRect(0.45 * inch, height - 1.55 * inch, width - 0.9 * inch, 1.05 * inch, 18, fill=1, stroke=0)
+
+    if os.path.exists(logo_path):
+        logo = ImageReader(logo_path)
+        c.drawImage(
+            logo,
+            0.75 * inch,
+            height - 1.32 * inch,
+            width=0.75 * inch,
+            height=0.75 * inch,
+            preserveAspectRatio=True,
+            mask="auto"
+        )
+
+    c.setFillColor(brown)
+    c.setFont("Helvetica-Bold", 20)
+    c.drawString(1.65 * inch, height - 0.9 * inch, "CoffeeVision AI")
+
+    c.setFillColor(green)
+    c.setFont("Helvetica-Bold", 13)
+    c.drawString(1.65 * inch, height - 1.18 * inch, "Reporte por proveedor")
+
+    c.setFillColor(dark)
+    c.setFont("Helvetica", 8)
+    c.drawRightString(
+        width - 0.75 * inch,
+        height - 0.78 * inch,
+        f"Generado: {timezone.now().strftime('%Y-%m-%d %H:%M')}"
+    )
+
+    y = height - 2.1 * inch
+
+    c.setFillColor(brown)
+    c.setFont("Helvetica-Bold", 14)
+    c.drawString(0.7 * inch, y, "Información del proveedor")
+
+    y -= 0.18 * inch
+    c.setStrokeColor(line)
+    c.line(0.7 * inch, y, width - 0.7 * inch, y)
+
+    y -= 0.38 * inch
+
+    def label_value(x, y, label, value):
+        c.setFillColor(colors.HexColor("#6b5b4f"))
+        c.setFont("Helvetica-Bold", 8)
+        c.drawString(x, y, label.upper())
+
+        c.setFillColor(dark)
+        c.setFont("Helvetica-Bold", 10)
+        c.drawString(x, y - 0.18 * inch, str(value))
+
+    label_value(0.8 * inch, y, "Proveedor", provider_name or "—")
+    label_value(3.2 * inch, y, "ID proveedor", provider.id)
+    label_value(5.1 * inch, y, "Contacto", getattr(provider, "contact", "") or "—")
+
+    y -= 0.95 * inch
+
+    cards = [
+        ("Lotes", summary["total_lots"]),
+        ("KG Procesados", f"{summary['total_kg']:.3f}"),
+        ("Calidad", f"{summary['quality_pct']:.2f}%"),
+        ("Rechazo", f"{summary['reject_pct']:.2f}%"),
+    ]
+
+    card_w = (width - 1.4 * inch - 0.24 * inch) / 4
+    x = 0.7 * inch
+
+    for title, value in cards:
+        c.setFillColor(colors.white)
+        c.setStrokeColor(line)
+        c.roundRect(x, y - 0.85 * inch, card_w, 0.75 * inch, 12, fill=1, stroke=1)
+
+        c.setFillColor(colors.HexColor("#6b5b4f"))
+        c.setFont("Helvetica-Bold", 8)
+        c.drawCentredString(x + card_w / 2, y - 0.28 * inch, title.upper())
+
+        c.setFillColor(brown)
+        c.setFont("Helvetica-Bold", 18)
+        c.drawCentredString(x + card_w / 2, y - 0.58 * inch, str(value))
+
+        x += card_w + 0.08 * inch
+
+    y -= 1.25 * inch
+
+    c.setFillColor(brown)
+    c.setFont("Helvetica-Bold", 14)
+    c.drawString(0.7 * inch, y, "Resumen del proveedor")
+
+    y -= 0.18 * inch
+    c.setStrokeColor(line)
+    c.line(0.7 * inch, y, width - 0.7 * inch, y)
+
+    y -= 0.35 * inch
+
+    accepted = summary["total_lots"] - summary["rejected"]
+
+    c.setFillColor(dark)
+    c.setFont("Helvetica", 10)
+    c.drawString(0.8 * inch, y, f"Lotes aceptados: {accepted}")
+    c.drawString(3.4 * inch, y, f"Lotes rechazados: {summary['rejected']}")
+
+    y -= 0.28 * inch
+    c.drawString(0.8 * inch, y, f"Porcentaje de calidad del proveedor: {summary['quality_pct']:.2f}%")
+
+    y -= 0.75 * inch
+
+    primary = summary["top_defects"]["primary"]
+    secondary = summary["top_defects"]["secondary"]
+
+    def draw_defect_box(title, data, x, y):
+        box_w = 2.95 * inch
+        box_h = 3.0 * inch
+
+        c.setFillColor(colors.white)
+        c.setStrokeColor(line)
+        c.roundRect(x, y - box_h, box_w, box_h, 12, fill=1, stroke=1)
+
+        c.setFillColor(brown)
+        c.setFont("Helvetica-Bold", 11)
+        c.drawString(x + 0.18 * inch, y - 0.3 * inch, title)
+
+        c.setStrokeColor(line)
+        c.line(x + 0.18 * inch, y - 0.45 * inch, x + box_w - 0.18 * inch, y - 0.45 * inch)
+
+        c.setFillColor(dark)
+        c.setFont("Helvetica", 9)
+
+        yy = y - 0.72 * inch
+
+        if not data:
+            c.drawString(x + 0.22 * inch, yy, "Sin datos.")
+            return
+
+        for k, v in data.items():
+            if yy < y - box_h + 0.25 * inch:
+                break
+
+            c.drawString(x + 0.22 * inch, yy, str(k).replace("_", " ").title())
+            c.drawRightString(x + box_w - 0.25 * inch, yy, str(v))
+            yy -= 0.22 * inch
+
+    draw_defect_box("Top defectos primarios", primary, 0.7 * inch, y)
+    draw_defect_box("Top defectos secundarios", secondary, 3.85 * inch, y)
+
+    c.setFillColor(colors.HexColor("#8a7a6b"))
+    c.setFont("Helvetica-Oblique", 8)
+    c.drawCentredString(width / 2, 0.55 * inch, "Generado automáticamente por CoffeeVision AI")
+
+    c.showPage()
+    c.save()
+
+    pdf = buf.getvalue()
+    buf.close()
+
+    resp = HttpResponse(pdf, content_type="application/pdf")
+    resp["Content-Disposition"] = f'attachment; filename="{filename}"'
+    return resp
+
+
 @login_required(login_url="login")
 def reports_provider_pdf(request, provider_id: int):
     provider = get_object_or_404(Provider, pk=provider_id)
@@ -1942,7 +2672,7 @@ def reports_provider_pdf(request, provider_id: int):
         },
     )
 
-    return _pdf_response("CoffeeVision AI - Reporte por Proveedor", filename, meta, summary)
+    return _pdf_provider_response(provider, provider_name, summary, filename)
 
 
 @login_required(login_url="login")
